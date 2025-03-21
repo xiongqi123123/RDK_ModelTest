@@ -21,6 +21,7 @@ public:
     int getClassesNum() const { return classes_num_; }
     std::vector<std::string> getClassesLabels() const { return classes_labels_; }
     std::string getImagePath() const { return image_path_; }
+    std::string getLabelPath() const { return label_path_; }
     std::string getOutputPath() const { return output_path_; }
 
 private:
@@ -31,5 +32,6 @@ private:
     int classes_num_;
     std::vector<std::string> classes_labels_;
     std::string image_path_;
+    std::string label_path_;
     std::string output_path_;
 };

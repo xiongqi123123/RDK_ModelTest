@@ -16,6 +16,9 @@
 #include "dnn/plugin/hb_dnn_plugin.h"   // BPU插件
 #include "dnn/hb_sys.h"           // BPU系统功能
 
+// JSON处理
+#include <nlohmann/json.hpp>
+
 // 错误检查宏
 #define RDK_CHECK_SUCCESS(value, errmsg)                        \
     do                                                          \
@@ -44,6 +47,29 @@
 #define H_32 20   // 特征图高度 - 大目标
 #define W_32 20   // 特征图宽度 - 大目标
 
+// 结果结构体
+struct InferenceResult {
+    float fps;                   // 帧率 (frames per second)
+    float preprocess_time;       // 前处理时间 (ms)
+    float inference_time;        // 推理时间 (ms)
+    float postprocess_time;      // 后处理时间 (ms)
+    float total_time;            // 总时间 (ms)
+    float precision;             // 精确率
+    float recall;                // 召回率
+    float mAP50;                 // mAP@0.5
+    float mAP50_95;              // mAP@0.5:0.95
+    std::string result_path;     // 结果图像路径
+};
+
+struct BBoxInfo {
+    float x;
+    float y;
+    float width;
+    float height;
+    int class_id;
+    std::string class_name;
+    float confidence;
+};
 
 class BPU_Detect{
     public:
@@ -57,9 +83,12 @@ class BPU_Detect{
         ~BPU_Detect();
 
         bool Model_Init();
-        bool Model_Inference(const cv::Mat& input_img, cv::Mat& output_img);
+        bool Model_Inference(const cv::Mat& input_img, cv::Mat& output_img, InferenceResult& result);
         bool Model_Release();
         void SetClassNames(const std::vector<std::string>& class_names) { class_names_ = class_names; }
+        void SetOutputPath(const std::string& output_path) { output_path_ = output_path; }
+        void SetTaskId(const std::string& task_id) { task_id_ = task_id; }
+        void SetLabelPath(const std::string& label_path) { label_path_ = label_path; }
     private:
         bool Model_Load();
         bool Model_Anchor_Init();
@@ -77,11 +106,16 @@ class BPU_Detect{
         bool Model_Postprocess();
         void Model_Draw();
         void Model_Print() const;
-        bool Model_Result_Save();
+        bool Model_Result_Save(InferenceResult& result);
+        void CalculateMetrics(InferenceResult& result);
+        bool LoadGroundTruthData();
+        float CalculateIoU(const BBoxInfo& box1, const BBoxInfo& box2);
 
         std::string model_name_;      // 模型名称
         std::string task_type_;       // 任务类型
         std::string model_path_;      // 模型文件路径
+        std::string task_id_;         // 任务ID
+        std::string output_path_;     // 输出路径
         int classes_num_;             // 类别数量
         float nms_threshold_;         // NMS阈值
         float score_threshold_;       // 置信度阈值
@@ -130,4 +164,6 @@ class BPU_Detect{
         std::vector<std::vector<float>> scores_;       // 每个类别的得分
         std::vector<std::vector<int>> indices_;        // NMS后的索引
         std::vector<std::string> class_names_;         // 类别名称
+        std::string label_path_;
+        std::vector<BBoxInfo> gt_boxes_; // Ground truth boxes from label data
 };
