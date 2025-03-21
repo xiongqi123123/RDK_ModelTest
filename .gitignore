@@ -32,3 +32,13 @@
 *.out
 *.app
 
+*.bin
+*.json
+*.jpg
+*.png
+*.jpeg
+*.bmp
+*.tiff
+*.gif
+
+build/
