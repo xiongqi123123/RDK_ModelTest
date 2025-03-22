@@ -24,7 +24,9 @@ BPU_Detect::BPU_Detect(const std::string& model_name,
       output_count_(0)
 {
     // 确定模型类型
-    model_type_ = DetermineModelType(model_name);
+    if (task_type_ == "detection") {
+        model_type_ = DetermineModelType(model_name);
+    }
     Model_Init();
 }
 
@@ -73,11 +75,11 @@ bool BPU_Detect::Model_Anchor_Init()
     
     // 如果是YOLOv5，使用标准的YOLOv5锚点
     if (model_type_ == YOLOV5) {
-        for(int i = 0; i < 3; i++) {
-            s_anchors_.push_back({anchors[i*2], anchors[i*2+1]});
-            m_anchors_.push_back({anchors[i*2+6], anchors[i*2+7]});
-            l_anchors_.push_back({anchors[i*2+12], anchors[i*2+13]});
-        }
+    for(int i = 0; i < 3; i++) {
+        s_anchors_.push_back({anchors[i*2], anchors[i*2+1]});
+        m_anchors_.push_back({anchors[i*2+6], anchors[i*2+7]});
+        l_anchors_.push_back({anchors[i*2+12], anchors[i*2+13]});
+    }
     } 
     // 如果是YOLO11或YOLOv8，不需要anchors，因为它们是anchor-free模型
     else if (model_type_ == YOLO11 || model_type_ == YOLOV8) {
@@ -105,40 +107,40 @@ bool BPU_Detect::Model_Load()
 bool BPU_Detect::Model_Output_Order()
 {
     if (model_type_ == YOLOV5 && task_type_ == "detection") {
-        // 初始化默认顺序
-        output_order_[0] = 0;  // 默认第1个输出
-        output_order_[1] = 1;  // 默认第2个输出
-        output_order_[2] = 2;  // 默认第3个输出
-        // 定义期望的输出特征图尺寸和通道数
-        int32_t expected_shapes[3][3] = {
-            {H_8,  W_8,  3 * (5 + classes_num_)},   // 小目标特征图: H/8 x W/8
-            {H_16, W_16, 3 * (5 + classes_num_)},   // 中目标特征图: H/16 x W/16
-            {H_32, W_32, 3 * (5 + classes_num_)}    // 大目标特征图: H/32 x W/32
-        };
-        for(int i = 0; i < 3; i++) {
-            for(int j = 0; j < 3; j++) {
+    // 初始化默认顺序
+    output_order_[0] = 0;  // 默认第1个输出
+    output_order_[1] = 1;  // 默认第2个输出
+    output_order_[2] = 2;  // 默认第3个输出
+    // 定义期望的输出特征图尺寸和通道数
+    int32_t expected_shapes[3][3] = {
+        {H_8,  W_8,  3 * (5 + classes_num_)},   // 小目标特征图: H/8 x W/8
+        {H_16, W_16, 3 * (5 + classes_num_)},   // 中目标特征图: H/16 x W/16
+        {H_32, W_32, 3 * (5 + classes_num_)}    // 大目标特征图: H/32 x W/32
+    };
+    for(int i = 0; i < 3; i++) {
+        for(int j = 0; j < 3; j++) {
                 hbDNNTensorProperties output_properties;
-                RDK_CHECK_SUCCESS(
-                    hbDNNGetOutputTensorProperties(&output_properties, dnn_handle_, j),
-                    "Get output tensor properties failed");
+            RDK_CHECK_SUCCESS(
+                hbDNNGetOutputTensorProperties(&output_properties, dnn_handle_, j),
+                "Get output tensor properties failed");
 
-                int32_t actual_h = output_properties.validShape.dimensionSize[1];
-                int32_t actual_w = output_properties.validShape.dimensionSize[2];
-                int32_t actual_c = output_properties.validShape.dimensionSize[3];
+            int32_t actual_h = output_properties.validShape.dimensionSize[1];
+            int32_t actual_w = output_properties.validShape.dimensionSize[2];
+            int32_t actual_c = output_properties.validShape.dimensionSize[3];
 
-                if(actual_h == expected_shapes[i][0] && 
-                actual_w == expected_shapes[i][1] && 
-                actual_c == expected_shapes[i][2]) {
+            if(actual_h == expected_shapes[i][0] && 
+            actual_w == expected_shapes[i][1] && 
+            actual_c == expected_shapes[i][2]) {
                     output_order_[i] = j;
-                    break;
-                    }
+                break;
                 }
             }
+        }
 
             std::cout << "\n============ Output Order Mapping for YOLOv5 ============" << std::endl;
-            std::cout << "Small object  (1/" << 8  << "): output[" << output_order_[0] << "]" << std::endl;
-            std::cout << "Medium object (1/" << 16 << "): output[" << output_order_[1] << "]" << std::endl;
-            std::cout << "Large object  (1/" << 32 << "): output[" << output_order_[2] << "]" << std::endl;
+        std::cout << "Small object  (1/" << 8  << "): output[" << output_order_[0] << "]" << std::endl;
+        std::cout << "Medium object (1/" << 16 << "): output[" << output_order_[1] << "]" << std::endl;
+        std::cout << "Large object  (1/" << 32 << "): output[" << output_order_[2] << "]" << std::endl;
             std::cout << "=================================================\n" << std::endl;
     }
     else if (model_type_ == YOLO11 && task_type_ == "detection") {
@@ -264,15 +266,15 @@ bool BPU_Detect::Model_Info_check()
         hbDNNGetModelNameList(&model_name_list, &model_count, packed_dnn_handle_),
         "hbDNNGetModelNameList failed");
     if(model_count > 1) {
-        std::cout << "Model count: " << model_count << std::endl;
-        std::cout << "Please check the model count!" << std::endl;
-        return false;
+    std::cout << "Model count: " << model_count << std::endl;
+    std::cout << "Please check the model count!" << std::endl;
+    return false;
     }
     model_name_ = model_name_list[0];
 
     RDK_CHECK_SUCCESS(
         hbDNNGetModelHandle(&dnn_handle_, packed_dnn_handle_, model_name_.c_str()),
-        "hbDNNGetModelHandle failed");
+    "hbDNNGetModelHandle failed");
 
     // 获取输入信息
     int32_t input_count = 0;
@@ -529,7 +531,7 @@ bool BPU_Detect::Model_Detection_Postprocess()
 
     for(int i = 0; i < classes_num_; i++) {
         if(!bboxes_[i].empty()) {
-            cv::dnn::NMSBoxes(bboxes_[i], scores_[i], score_threshold_, 
+        cv::dnn::NMSBoxes(bboxes_[i], scores_[i], score_threshold_, 
                         nms_threshold_, indices_[i], 1.f, nms_top_k_);
         }
     }
@@ -537,10 +539,124 @@ bool BPU_Detect::Model_Detection_Postprocess()
     return true;
 }
 
-bool BPU_Detect::Model_Classification_Postprocess()
-{
-    // 获取输出tensor
-    // TODO: 实现分类任务的后处理逻辑
+bool BPU_Detect::Model_Classification_Postprocess() {
+    if (output_count_ <= 0 || output_tensors_ == nullptr) {
+        std::cerr << "Error: No valid output tensors for classification." << std::endl;
+        return false;
+    }
+
+    // 获取输出张量
+    hbDNNTensor& output_tensor = output_tensors_[0];
+    
+    // 刷新缓存，确保数据从BPU内存同步到CPU内存
+    hbSysFlushMem(&output_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
+    
+    // 获取输出指针和尺寸
+    float* output_data = nullptr;
+    int num_classes = classes_num_;
+    
+    // 根据量化类型处理输出数据
+    if (output_tensor.properties.quantiType == NONE) {
+        // 非量化模型，直接获取float输出
+        output_data = reinterpret_cast<float*>(output_tensor.sysMem[0].virAddr);
+    } else if (output_tensor.properties.quantiType == SCALE) {
+        // 量化模型，需要反量化处理
+        std::vector<float> dequantized(num_classes);
+        int32_t* quant_data = reinterpret_cast<int32_t*>(output_tensor.sysMem[0].virAddr);
+        float scale = output_tensor.properties.scale.scaleData[0];
+        
+        for (int i = 0; i < num_classes; ++i) {
+            dequantized[i] = quant_data[i] * scale;
+        }
+        
+        // 创建临时缓冲区存储反量化数据
+        float* temp_data = new float[num_classes];
+        for (int i = 0; i < num_classes; ++i) {
+            temp_data[i] = dequantized[i];
+        }
+        output_data = temp_data;
+    } else {
+        std::cerr << "Error: Unsupported quantization type: " << output_tensor.properties.quantiType << std::endl;
+        return false;
+    }
+    
+    if (!output_data) {
+        std::cerr << "Error: Invalid output data pointer." << std::endl;
+        return false;
+    }
+    
+    // 应用softmax (如果输出不是概率)
+    std::vector<float> probabilities(num_classes);
+    bool apply_softmax = true; // 可以根据模型特性设置为false如果输出已经是概率
+    
+    if (apply_softmax) {
+        // 找到最大值用于数值稳定性
+        float max_val = output_data[0];
+        for (int i = 1; i < num_classes; ++i) {
+            if (output_data[i] > max_val) {
+                max_val = output_data[i];
+            }
+        }
+        
+        // 计算softmax
+        float sum_exp = 0.0f;
+        for (int i = 0; i < num_classes; ++i) {
+            probabilities[i] = std::exp(output_data[i] - max_val);
+            sum_exp += probabilities[i];
+        }
+        
+        // 归一化
+        for (int i = 0; i < num_classes; ++i) {
+            probabilities[i] /= sum_exp;
+        }
+    } else {
+        // 如果输出已经是概率，直接复制
+        for (int i = 0; i < num_classes; ++i) {
+            probabilities[i] = output_data[i];
+        }
+    }
+    
+    // 如果我们使用了临时缓冲区，释放它
+    if (output_tensor.properties.quantiType == SCALE) {
+        delete[] output_data;
+    }
+    
+    // 准备存储top-k结果
+    int top_k = std::min(5, num_classes); // 获取前5个结果或所有类别(如果类别少于5个)
+    
+    // 初始化分类结果结构
+    scores_.resize(1);
+    bboxes_.resize(1);
+    indices_.resize(1);
+    
+    // 清空上一次的结果
+    scores_[0].clear();
+    bboxes_[0].clear();
+    indices_[0].clear();
+    
+    // 创建索引数组并按概率排序
+    std::vector<std::pair<float, int>> prob_index_pairs;
+    for (int i = 0; i < num_classes; ++i) {
+        prob_index_pairs.push_back({probabilities[i], i});
+    }
+    
+    // 按概率降序排序
+    std::sort(prob_index_pairs.begin(), prob_index_pairs.end(), 
+        [](const std::pair<float, int>& a, const std::pair<float, int>& b) {
+            return a.first > b.first;
+        });
+    
+    // 存储top-k结果
+    for (int i = 0; i < top_k; ++i) {
+        if (i < static_cast<int>(prob_index_pairs.size())) {
+            scores_[0].push_back(prob_index_pairs[i].first);
+            // 对于分类，我们不使用bboxes，但为了保持数据结构一致，我们添加一个默认值
+            cv::Rect2d empty_bbox(0, 0, 0, 0);
+            bboxes_[0].push_back(empty_bbox);
+            indices_[0].push_back(prob_index_pairs[i].second);
+        }
+    }
+    
     return true;
 }
 
@@ -549,7 +665,7 @@ bool BPU_Detect::Model_Postprocess()
 {
     if(task_type_ == "detection"){
         if (model_type_ == YOLOV5) {
-            if(!Model_Detection_Postprocess()){
+        if(!Model_Detection_Postprocess()){
                 std::cout << "YOLOv5 detection postprocess failed" << std::endl;
                 return false;
             }
@@ -607,7 +723,46 @@ void BPU_Detect::Model_Draw(){
         }
     }
     else if(task_type_ == "classification"){
-        // TODO: 分类任务结果绘制
+        // 为分类结果创建顶部叠加层
+        if (!indices_[0].empty()) {
+            int img_width = output_img_.cols;
+            int img_height = output_img_.rows;
+            
+            // 计算结果区域高度 (限制在图像高度的1/3以内)
+            int results_count = static_cast<int>(indices_[0].size());
+            int box_height = std::min(30 * results_count, img_height / 3);
+            
+            // 创建半透明覆盖层
+            cv::Rect overlay_rect(0, 0, img_width, box_height);
+            cv::Mat overlay = output_img_(overlay_rect).clone();
+            cv::addWeighted(overlay, 0.7, cv::Scalar(0, 0, 0), 0.3, 0, output_img_(overlay_rect));
+            
+            // 添加标题
+            std::string title = "Top " + std::to_string(results_count) + " Classifications:";
+            cv::putText(output_img_, title, cv::Point(10, 30), 
+                      cv::FONT_HERSHEY_SIMPLEX, 0.7, cv::Scalar(255, 255, 255), 2);
+            
+            // 显示每个分类结果
+            for (int i = 0; i < results_count; i++) {
+                int idx = indices_[0][i];
+                float score = scores_[0][i];
+                std::string class_name = (idx < static_cast<int>(class_names_.size())) ? 
+                                       class_names_[idx] : "class" + std::to_string(idx);
+                
+                // 格式化结果文本
+                std::string result_text = "#" + std::to_string(i+1) + ": " + class_name + 
+                                        " (" + std::to_string(static_cast<int>(score * 100)) + "%)";
+                
+                // 确保文本不会过长，超出图像边界
+                if (result_text.length() > 50) {
+                    result_text = result_text.substr(0, 47) + "...";
+                }
+                
+                // 绘制结果文本
+                cv::putText(output_img_, result_text, cv::Point(10, 30 + (i+1) * 25), 
+                          cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 1);
+            }
+        }
     }
 }
 
@@ -644,9 +799,27 @@ void BPU_Detect::Model_Print() const {
         std::cout << "========================================\n" << std::endl;
     }
     else if(task_type_ == "classification"){
-        
-        // TODO: 分类任务结果打印
-
+        // 打印分类结果
+        if (!indices_[0].empty()) {
+            std::cout << "\n============ Classification Results ============" << std::endl;
+            
+            for (size_t i = 0; i < indices_[0].size(); i++) {
+                int idx = indices_[0][i];
+                float probability = scores_[0][idx];
+                
+                // 计算类别ID (这里使用idx作为类别ID因为我们在后处理中对结果进行了排序)
+                std::string class_name = (idx < static_cast<int>(class_names_.size())) ? 
+                                       class_names_[idx] : "class" + std::to_string(idx);
+                
+                std::cout << "排名 #" << (i + 1) << ": " << class_name 
+                          << " (ID: " << idx << "), 概率: " 
+                          << std::fixed << std::setprecision(2) << probability * 100 << "%" << std::endl;
+            }
+            
+            std::cout << "==============================================\n" << std::endl;
+        } else {
+            std::cout << "\n没有找到有效的分类结果。\n" << std::endl;
+        }
     }
 }
 
@@ -664,27 +837,27 @@ bool BPU_Detect::Model_Inference(const cv::Mat& input_img, cv::Mat& output_img, 
     // 前处理计时
     auto preprocess_start = std::chrono::high_resolution_clock::now();
     if(!Model_Preprocess(input_img)) {
-        return false;
-    }
+            return false;
+        }
     auto preprocess_end = std::chrono::high_resolution_clock::now();
     total_preprocess_time_ = std::chrono::duration_cast<std::chrono::milliseconds>(preprocess_end - preprocess_start).count();
-    
+
     // 推理计时
     auto inference_start = std::chrono::high_resolution_clock::now();
     if(!Model_Detector()) {
-        return false;
-    }
+            return false;
+        }
     auto inference_end = std::chrono::high_resolution_clock::now();
     total_inference_time_ = std::chrono::duration_cast<std::chrono::milliseconds>(inference_end - inference_start).count();
-    
+
     // 后处理计时
     auto postprocess_start = std::chrono::high_resolution_clock::now();
     if(!Model_Postprocess()) {
-        return false;
-    }
+            return false;
+        }
     auto postprocess_end = std::chrono::high_resolution_clock::now();
     total_postprocess_time_ = std::chrono::duration_cast<std::chrono::milliseconds>(postprocess_end - postprocess_start).count();
-    
+
     // 计算总时间
     total_time_ = total_preprocess_time_ + total_inference_time_ + total_postprocess_time_;
     float fps = 1000.0f / total_time_; // 计算帧率
@@ -993,10 +1166,10 @@ bool BPU_Detect::Model_Release() {
         if (output_tensors_) {
             for(int i = 0; i < output_count_; i++) {
                 if(output_tensors_[i].sysMem[0].virAddr) {
-                    hbSysFreeMem(&(output_tensors_[i].sysMem[0]));
-                }
+                hbSysFreeMem(&(output_tensors_[i].sysMem[0]));
             }
-            
+        }
+        
             delete[] output_tensors_;
             output_tensors_ = nullptr;
         }
