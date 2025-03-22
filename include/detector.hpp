@@ -72,8 +72,8 @@ struct InferenceResult {
     float recall;                // 召回率
     float mAP50;                 // mAP@0.5
     float mAP50_95;              // mAP@0.5:0.95
-    float acc_top1;              // 分类准确率 Top-1 (acc@1)
-    float acc_top5;              // 分类准确率 Top-5 (acc@5)
+    float acc1;                  // Top-1准确率 (分类任务)
+    float acc5;                  // Top-5准确率 (分类任务)
     std::string result_path;     // 结果图像路径
 };
 

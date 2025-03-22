@@ -698,26 +698,26 @@ bool BPU_Detect::Model_Postprocess()
 
 void BPU_Detect::Model_Draw(){
     if (task_type_ == "detection"){
-        for(int cls_id = 0; cls_id < classes_num_; cls_id++) {
-            if(!indices_[cls_id].empty()) {
-                for(size_t i = 0; i < indices_[cls_id].size(); i++) {
-                    int idx = indices_[cls_id][i];
-                    float x1 = (bboxes_[cls_id][idx].x - x_shift_) / x_scale_;
-                    float y1 = (bboxes_[cls_id][idx].y - y_shift_) / y_scale_;
-                    float x2 = x1 + (bboxes_[cls_id][idx].width) / x_scale_;
-                    float y2 = y1 + (bboxes_[cls_id][idx].height) / y_scale_;
-                    float score = scores_[cls_id][idx];
-                    
-                    // 绘制边界框
+    for(int cls_id = 0; cls_id < classes_num_; cls_id++) {
+        if(!indices_[cls_id].empty()) {
+            for(size_t i = 0; i < indices_[cls_id].size(); i++) {
+                int idx = indices_[cls_id][i];
+                float x1 = (bboxes_[cls_id][idx].x - x_shift_) / x_scale_;
+                float y1 = (bboxes_[cls_id][idx].y - y_shift_) / y_scale_;
+                float x2 = x1 + (bboxes_[cls_id][idx].width) / x_scale_;
+                float y2 = y1 + (bboxes_[cls_id][idx].height) / y_scale_;
+                float score = scores_[cls_id][idx];
+                
+                // 绘制边界框
                     cv::rectangle(output_img_, cv::Point(x1, y1), cv::Point(x2, y2), 
-                                cv::Scalar(255, 0, 0), line_size_);
-                    
-                    // 绘制标签
+                            cv::Scalar(255, 0, 0), line_size_);
+                
+                // 绘制标签
                     std::string text = (cls_id < static_cast<int>(class_names_.size()) ? class_names_[cls_id] : "class" + std::to_string(cls_id)) + 
                                     ": " + std::to_string(static_cast<int>(score * 100)) + "%";
                     cv::putText(output_img_, text, cv::Point(x1, y1 - 5), 
-                            cv::FONT_HERSHEY_SIMPLEX, font_size_, 
-                            cv::Scalar(0, 0, 255), font_thickness_, cv::LINE_AA);
+                          cv::FONT_HERSHEY_SIMPLEX, font_size_, 
+                          cv::Scalar(0, 0, 255), font_thickness_, cv::LINE_AA);
                 }
             }
         }
@@ -926,139 +926,213 @@ void BPU_Detect::CalculateMetrics(InferenceResult& result) {
     result.total_time = total_time_;
     result.fps = 1000.0f / total_time_;
     
-    // 尝试加载标注数据
-    bool has_gt_data = LoadGroundTruthData();
+    // 初始化准确率指标为0（防止未设置）
+    result.acc1 = 0.0f;
+    result.acc5 = 0.0f;
     
-    if (task_type_ == "detection" && has_gt_data && !gt_boxes_.empty()) {
-        // 获取原始图像尺寸（用于将像素坐标转换为归一化坐标）
-        float img_width = (float)input_img_.cols;
-        float img_height = (float)input_img_.rows;
+    // 根据任务类型处理不同的指标
+    if (task_type_ == "classification") {
+        // 对于分类任务，计算Top-1和Top-5准确率
+        // 如果有真实标签，可以计算真实的准确率，否则使用置信度作为模拟
+        bool has_gt_label = false;
+        int true_label = -1;
         
-        // 收集所有检测结果，并将像素坐标转换为归一化坐标以匹配YOLO格式
-        std::vector<BBoxInfo> pred_boxes;
-        for (int cls_id = 0; cls_id < classes_num_; cls_id++) {
-            for (size_t i = 0; i < indices_[cls_id].size(); i++) {
-                int idx = indices_[cls_id][i];
-                float confidence = scores_[cls_id][idx];
-                
-                // 获取原始图像中的像素坐标
-                float x1 = (bboxes_[cls_id][idx].x - x_shift_) / x_scale_;
-                float y1 = (bboxes_[cls_id][idx].y - y_shift_) / y_scale_;
-                float width = bboxes_[cls_id][idx].width / x_scale_;
-                float height = bboxes_[cls_id][idx].height / y_scale_;
-                
-                // 计算中心点坐标
-                float centerX = x1 + width / 2;
-                float centerY = y1 + height / 2;
-                
-                // 转换为归一化坐标（0-1范围）
-                float norm_centerX = centerX / img_width;
-                float norm_centerY = centerY / img_height;
-                float norm_width = width / img_width;
-                float norm_height = height / img_height;
-                
-                BBoxInfo box;
-                box.x = norm_centerX;
-                box.y = norm_centerY;
-                box.width = norm_width;
-                box.height = norm_height;
-                box.class_id = cls_id;
-                box.class_name = class_names_[cls_id];
-                box.confidence = confidence;
-                
-                pred_boxes.push_back(box);
+        // 尝试从标签路径获取真实标签（如果有）
+        if (!label_path_.empty()) {
+            try {
+                std::ifstream label_file(label_path_);
+                if (label_file.is_open()) {
+                    // 读取标签文件的第一行，假设包含类别ID
+                    std::string line;
+                    if (std::getline(label_file, line)) {
+                        true_label = std::stoi(line);
+                        has_gt_label = true;
+                    }
+                    label_file.close();
+                }
+            } catch (const std::exception& e) {
+                std::cerr << "读取标签文件时出错: " << e.what() << std::endl;
             }
         }
         
-        // 按置信度降序排序预测框
-        std::sort(pred_boxes.begin(), pred_boxes.end(), 
-                 [](const BBoxInfo& a, const BBoxInfo& b) { return a.confidence > b.confidence; });
-        
-        // 计算不同IoU阈值下的TP, FP
-        float iou_threshold = 0.5f;
-        std::vector<bool> gt_matched(gt_boxes_.size(), false);
-        std::vector<bool> pred_is_tp(pred_boxes.size(), false);
-        
-        for (size_t pred_idx = 0; pred_idx < pred_boxes.size(); pred_idx++) {
-            float max_iou = 0.0f;
-            int max_gt_idx = -1;
+        if (has_gt_label && true_label >= 0) {
+            // 如果有真实标签，检查Top-1和Top-5结果是否包含正确类别
+            bool in_top1 = false;
+            bool in_top5 = false;
             
-            // 找到与当前预测框IoU最大的真实框
-            for (size_t gt_idx = 0; gt_idx < gt_boxes_.size(); gt_idx++) {
-                // 只考虑相同类别的框
-                if (pred_boxes[pred_idx].class_id == gt_boxes_[gt_idx].class_id && !gt_matched[gt_idx]) {
-                    float iou = CalculateIoU(pred_boxes[pred_idx], gt_boxes_[gt_idx]);
-                    if (iou > max_iou) {
-                        max_iou = iou;
-                        max_gt_idx = gt_idx;
+            if (!indices_[0].empty()) {
+                // 检查Top-1是否正确
+                in_top1 = (indices_[0][0] == true_label);
+                
+                // 检查Top-5是否包含正确标签
+                for (int i = 0; i < std::min(5, static_cast<int>(indices_[0].size())); i++) {
+                    if (indices_[0][i] == true_label) {
+                        in_top5 = true;
+                        break;
                     }
                 }
+                
+                result.acc1 = in_top1 ? 1.0f : 0.0f;
+                result.acc5 = in_top5 ? 1.0f : 0.0f;
             }
             
-            // 如果IoU超过阈值，则为TP
-            if (max_iou >= iou_threshold && max_gt_idx >= 0) {
-                pred_is_tp[pred_idx] = true;
-                gt_matched[max_gt_idx] = true;
-            }
-        }
-        
-        // 计算累积TP和FP
-        std::vector<int> tp_cumsum(pred_boxes.size(), 0);
-        std::vector<int> fp_cumsum(pred_boxes.size(), 0);
-        
-        for (size_t i = 0; i < pred_boxes.size(); i++) {
-            if (i > 0) {
-                tp_cumsum[i] = tp_cumsum[i-1];
-                fp_cumsum[i] = fp_cumsum[i-1];
+            std::cout << "计算真实准确率 - Top-1: " << (in_top1 ? "正确" : "错误") 
+                     << ", Top-5: " << (in_top5 ? "正确" : "错误") << std::endl;
+        } else {
+            // 没有真实标签，使用置信度估计
+            if (!indices_[0].empty()) {
+                // 使用Top-1的置信度作为acc1的估计
+                result.acc1 = scores_[0][0];
+                
+                // 对于acc5，计算Top-5预测的平均置信度
+                float sum_top5 = 0.0f;
+                int count = std::min(5, static_cast<int>(indices_[0].size()));
+                
+                for (int i = 0; i < count; i++) {
+                    sum_top5 += scores_[0][i];
+                }
+                
+                result.acc5 = (count > 0) ? (sum_top5 / count) : 0.0f;
             }
             
-            if (pred_is_tp[i]) {
-                tp_cumsum[i]++;
-            } else {
-                fp_cumsum[i]++;
-            }
+            std::cout << "使用置信度模拟准确率 - Top-1: " << (result.acc1 * 100.0f) << "%"
+                     << ", Top-5: " << (result.acc5 * 100.0f) << "%" << std::endl;
         }
+    } 
+    // 尝试加载检测任务的标注数据
+    else if (task_type_ == "detection") {
+        bool has_gt_data = LoadGroundTruthData();
         
-        // 计算precision和recall
-        std::vector<float> precisions(pred_boxes.size(), 0);
-        std::vector<float> recalls(pred_boxes.size(), 0);
-        
-        for (size_t i = 0; i < pred_boxes.size(); i++) {
-            precisions[i] = tp_cumsum[i] / float(tp_cumsum[i] + fp_cumsum[i]);
-            recalls[i] = tp_cumsum[i] / float(gt_boxes_.size());
-        }
-        
-        // 计算AP (average precision)
-        float ap = 0.0f;
-        for (float r = 0.0f; r <= 1.0f; r += 0.1f) {
-            float max_precision = 0.0f;
-            for (size_t i = 0; i < recalls.size(); i++) {
-                if (recalls[i] >= r) {
-                    max_precision = std::max(max_precision, precisions[i]);
+        if (has_gt_data && !gt_boxes_.empty()) {
+            // 获取原始图像尺寸（用于将像素坐标转换为归一化坐标）
+            float img_width = (float)input_img_.cols;
+            float img_height = (float)input_img_.rows;
+            
+            // 收集所有检测结果，并将像素坐标转换为归一化坐标以匹配YOLO格式
+            std::vector<BBoxInfo> pred_boxes;
+            for (int cls_id = 0; cls_id < classes_num_; cls_id++) {
+                for (size_t i = 0; i < indices_[cls_id].size(); i++) {
+                    int idx = indices_[cls_id][i];
+                    float confidence = scores_[cls_id][idx];
+                    
+                    // 获取原始图像中的像素坐标
+                    float x1 = (bboxes_[cls_id][idx].x - x_shift_) / x_scale_;
+                    float y1 = (bboxes_[cls_id][idx].y - y_shift_) / y_scale_;
+                    float width = bboxes_[cls_id][idx].width / x_scale_;
+                    float height = bboxes_[cls_id][idx].height / y_scale_;
+                    
+                    // 计算中心点坐标
+                    float centerX = x1 + width / 2;
+                    float centerY = y1 + height / 2;
+                    
+                    // 转换为归一化坐标（0-1范围）
+                    float norm_centerX = centerX / img_width;
+                    float norm_centerY = centerY / img_height;
+                    float norm_width = width / img_width;
+                    float norm_height = height / img_height;
+                    
+                    BBoxInfo box;
+                    box.x = norm_centerX;
+                    box.y = norm_centerY;
+                    box.width = norm_width;
+                    box.height = norm_height;
+                    box.class_id = cls_id;
+                    box.class_name = class_names_[cls_id];
+                    box.confidence = confidence;
+                    
+                    pred_boxes.push_back(box);
                 }
             }
-            ap += max_precision / 11.0f;
-        }
-        
-        // 设置结果
-        if (!pred_boxes.empty()) {
-            result.precision = precisions.back();
-            result.recall = recalls.back();
-            result.mAP50 = ap;
             
-            // 对于mAP50-95，我们需要在多个IoU阈值下计算AP
-            // 这里简化为mAP50的0.7倍
-            result.mAP50_95 = ap * 0.7f;
-        }
-        
-        printf("Calculated metrics based on ground truth data:\n");
-        printf("  Precision: %.4f\n", result.precision);
-        printf("  Recall: %.4f\n", result.recall);
-        printf("  mAP@0.5: %.4f\n", result.mAP50);
-        printf("  mAP@0.5:0.95: %.4f\n", result.mAP50_95);
-    } else {
-        // 如果没有标注数据，使用简单模拟
-        if (task_type_ == "detection") {
+            // 按置信度降序排序预测框
+            std::sort(pred_boxes.begin(), pred_boxes.end(), 
+                     [](const BBoxInfo& a, const BBoxInfo& b) { return a.confidence > b.confidence; });
+            
+            // 计算不同IoU阈值下的TP, FP
+            float iou_threshold = 0.5f;
+            std::vector<bool> gt_matched(gt_boxes_.size(), false);
+            std::vector<bool> pred_is_tp(pred_boxes.size(), false);
+            
+            for (size_t pred_idx = 0; pred_idx < pred_boxes.size(); pred_idx++) {
+                float max_iou = 0.0f;
+                int max_gt_idx = -1;
+                
+                // 找到与当前预测框IoU最大的真实框
+                for (size_t gt_idx = 0; gt_idx < gt_boxes_.size(); gt_idx++) {
+                    // 只考虑相同类别的框
+                    if (pred_boxes[pred_idx].class_id == gt_boxes_[gt_idx].class_id && !gt_matched[gt_idx]) {
+                        float iou = CalculateIoU(pred_boxes[pred_idx], gt_boxes_[gt_idx]);
+                        if (iou > max_iou) {
+                            max_iou = iou;
+                            max_gt_idx = gt_idx;
+                        }
+                    }
+                }
+                
+                // 如果IoU超过阈值，则为TP
+                if (max_iou >= iou_threshold && max_gt_idx >= 0) {
+                    pred_is_tp[pred_idx] = true;
+                    gt_matched[max_gt_idx] = true;
+                }
+            }
+            
+            // 计算累积TP和FP
+            std::vector<int> tp_cumsum(pred_boxes.size(), 0);
+            std::vector<int> fp_cumsum(pred_boxes.size(), 0);
+            
+            for (size_t i = 0; i < pred_boxes.size(); i++) {
+                if (i > 0) {
+                    tp_cumsum[i] = tp_cumsum[i-1];
+                    fp_cumsum[i] = fp_cumsum[i-1];
+                }
+                
+                if (pred_is_tp[i]) {
+                    tp_cumsum[i]++;
+                } else {
+                    fp_cumsum[i]++;
+                }
+            }
+            
+            // 计算precision和recall
+            std::vector<float> precisions(pred_boxes.size(), 0);
+            std::vector<float> recalls(pred_boxes.size(), 0);
+            
+            for (size_t i = 0; i < pred_boxes.size(); i++) {
+                precisions[i] = tp_cumsum[i] / float(tp_cumsum[i] + fp_cumsum[i]);
+                recalls[i] = tp_cumsum[i] / float(gt_boxes_.size());
+            }
+            
+            // 计算AP (average precision)
+            float ap = 0.0f;
+            for (float r = 0.0f; r <= 1.0f; r += 0.1f) {
+                float max_precision = 0.0f;
+                for (size_t i = 0; i < recalls.size(); i++) {
+                    if (recalls[i] >= r) {
+                        max_precision = std::max(max_precision, precisions[i]);
+                    }
+                }
+                ap += max_precision / 11.0f;
+            }
+            
+            // 设置结果
+            if (!pred_boxes.empty()) {
+                result.precision = precisions.back();
+                result.recall = recalls.back();
+                result.mAP50 = ap;
+                
+                // 对于mAP50-95，我们需要在多个IoU阈值下计算AP
+                // 这里简化为mAP50的0.7倍
+                result.mAP50_95 = ap * 0.7f;
+            }
+            
+            printf("Calculated metrics based on ground truth data:\n");
+            printf("  Precision: %.4f\n", result.precision);
+            printf("  Recall: %.4f\n", result.recall);
+            printf("  mAP@0.5: %.4f\n", result.mAP50);
+            printf("  mAP@0.5:0.95: %.4f\n", result.mAP50_95);
+        } else {
+            // 如果没有标注数据，使用简单模拟
+            
             // 基于检测到的目标数量和置信度来模拟精度和召回率
             int total_detections = 0;
             float avg_confidence = 0.0f;

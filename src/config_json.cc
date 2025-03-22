@@ -125,6 +125,27 @@ bool ResultSaver::SaveResults(const std::string& output_path,
             }
         }
         result_json["detections"] = detections;
+    } else if (task_type == "classification") {
+        // 添加分类结果
+        nlohmann::json classifications = nlohmann::json::array();
+        // 添加Top-5结果
+        int top_count = std::min(5, static_cast<int>(indices[0].size()));
+        
+        for (int i = 0; i < top_count; i++) {
+            int idx = indices[0][i];
+            float confidence = scores[0][i];
+            
+            nlohmann::json classification;
+            classification["rank"] = i + 1;
+            classification["class_id"] = idx;
+            classification["class_name"] = (idx < static_cast<int>(class_names.size())) ? 
+                                       class_names[idx] : "class" + std::to_string(idx);
+            classification["confidence"] = confidence;
+            
+            classifications.push_back(classification);
+        }
+        
+        result_json["classifications"] = classifications;
     }
     
     // 按照指定的顺序添加字段
@@ -138,13 +159,23 @@ bool ResultSaver::SaveResults(const std::string& output_path,
         {"postprocess_time", result.postprocess_time},
         {"total_time", result.total_time}
     };
-    ordered_json["metrics"] = {
-        {"mAP50", result.mAP50},
-        {"mAP50-95", result.mAP50_95},
-        {"precision", result.precision},
-        {"recall", result.recall}
-    };
-    ordered_json["detections"] = result_json["detections"];
+    
+    // 根据任务类型设置不同的指标
+    if (task_type == "detection") {
+        ordered_json["metrics"] = {
+            {"mAP50", result.mAP50},
+            {"mAP50-95", result.mAP50_95},
+            {"precision", result.precision},
+            {"recall", result.recall}
+        };
+        ordered_json["detections"] = result_json["detections"];
+    } else if (task_type == "classification") {
+        ordered_json["metrics"] = {
+            {"accuracy_top1", result.acc1},
+            {"accuracy_top5", result.acc5}
+        };
+        ordered_json["classifications"] = result_json["classifications"];
+    }
     
     // 保存JSON结果
     std::string json_path = output_path + "result_" + task_id + ".json";
