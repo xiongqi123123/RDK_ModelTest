@@ -1,3 +1,6 @@
+#ifndef DETECTOR_H
+#define DETECTOR_H
+
 // C/C++ Standard Librarys
 #include <iostream>     // 输入输出流
 #include <vector>      // 向量容器
@@ -39,6 +42,9 @@
 #define DEFAULT_FONT_THICKNESS 1.0f // 绘制标签的字体粗细, 默认 1.0
 #define DEFAULT_LINE_SIZE 2.0f // 绘制矩形框的线宽, 默认2.0
 
+// YOLOv11特有常量
+#define REG 16  // 离散化程度的超参数，YOLO11中使用
+
 // 特征图尺寸宏定义
 #define H_8 80    // 特征图高度 - 小目标
 #define W_8 80    // 特征图宽度 - 小目标 
@@ -46,6 +52,14 @@
 #define W_16 40   // 特征图宽度 - 中目标
 #define H_32 20   // 特征图高度 - 大目标
 #define W_32 20   // 特征图宽度 - 大目标
+
+// 模型类型枚举
+enum ModelType {
+    YOLOV5 = 0,   // YOLOv5系列模型
+    YOLO11 = 1,   // YOLO11系列模型
+    YOLOV8 = 2,   // YOLOv8系列模型
+    UNKNOWN = -1  // 未知模型类型
+};
 
 // 结果结构体
 struct InferenceResult {
@@ -97,11 +111,21 @@ class BPU_Detect{
         bool Model_Preprocess(const cv::Mat& input_img);
         bool Model_Detector();
         bool Model_Detection_Postprocess();
+        bool Model_Detection_Postprocess_YOLO11(); // YOLO11专用后处理
+        bool Model_Detection_Postprocess_YOLOV8(); // YOLOv8专用后处理
         void Model_Process_FeatureMap(hbDNNTensor& output_tensor, 
                                      int feature_h, 
                                      int feature_w, 
                                      const std::vector<std::vector<float>>& anchors, 
                                      float conf_thres);
+        void Model_Process_FeatureMap_YOLO11(hbDNNTensor& cls_tensor, 
+                                   hbDNNTensor& bbox_tensor,
+                                   int feature_h, 
+                                   int feature_w); // YOLO11专用特征图处理
+        void Model_Process_FeatureMap_YOLOV8(hbDNNTensor& output_tensor,
+                                   int feature_h,
+                                   int feature_w,
+                                   float stride); // YOLOv8专用特征图处理
         bool Model_Classification_Postprocess();
         bool Model_Postprocess();
         void Model_Draw();
@@ -110,6 +134,7 @@ class BPU_Detect{
         void CalculateMetrics(InferenceResult& result);
         bool LoadGroundTruthData();
         float CalculateIoU(const BBoxInfo& box1, const BBoxInfo& box2);
+        ModelType DetermineModelType(const std::string& model_name);
 
         std::string model_name_;      // 模型名称
         std::string task_type_;       // 任务类型
@@ -124,6 +149,9 @@ class BPU_Detect{
         float font_size_;            // 绘制文字大小
         float font_thickness_;       // 绘制文字粗细
         float line_size_;            // 绘制线条粗细
+        hbDNNTaskHandle_t task_handle_;          // 推理任务句柄
+        ModelType model_type_;        // 模型类型
+        int output_count_;            // 输出tensor数量
 
         float total_inference_time_;
         float total_preprocess_time_;
@@ -140,7 +168,7 @@ class BPU_Detect{
 
         int input_h_;// 输入高度
         int input_w_;// 输入宽度
-        int output_order_[3];// 输出顺序映射
+        int output_order_[6];// 输出顺序映射，YOLO11有6个输出
 
         float x_scale_;                          // X方向缩放比例
         float y_scale_;                          // Y方向缩放比例
@@ -157,8 +185,6 @@ class BPU_Detect{
 
         hbDNNTensor* output_tensors_;// 输出tensor数组
 
-        hbDNNTaskHandle_t task_handle_;          // 推理任务句柄
-
         // 检测结果存储
         std::vector<std::vector<cv::Rect2d>> bboxes_;  // 每个类别的边界框
         std::vector<std::vector<float>> scores_;       // 每个类别的得分
@@ -167,3 +193,5 @@ class BPU_Detect{
         std::string label_path_;
         std::vector<BBoxInfo> gt_boxes_; // Ground truth boxes from label data
 };
+
+#endif // DETECTOR_H

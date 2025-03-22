@@ -1,5 +1,7 @@
 #include "detector.hpp"
 #include <fstream>
+#include "config_json.hpp"
+
 BPU_Detect::BPU_Detect(const std::string& model_name,
                        const std::string& task_type,
                        const std::string& model_path,
@@ -18,9 +20,41 @@ BPU_Detect::BPU_Detect(const std::string& model_name,
       font_size_(DEFAULT_FONT_SIZE),
       font_thickness_(DEFAULT_FONT_THICKNESS),
       line_size_(DEFAULT_LINE_SIZE),
-      task_handle_(nullptr)
+      task_handle_(nullptr),
+      output_count_(0)
 {
+    // 确定模型类型
+    model_type_ = DetermineModelType(model_name);
     Model_Init();
+}
+
+// 从模型名称中判断模型类型
+ModelType BPU_Detect::DetermineModelType(const std::string& model_name) {
+    // 转换为小写以便比较
+    std::string name_lower = model_name;
+    std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), 
+                   [](unsigned char c){ return std::tolower(c); });
+    
+    // 判断是否包含yolo11关键字
+    if (name_lower.find("yolo11") != std::string::npos) {
+        std::cout << "检测到YOLO11系列模型" << std::endl;
+        return YOLO11;
+    } 
+    // 判断是否包含yolov8关键字
+    else if (name_lower.find("yolov8") != std::string::npos) {
+        std::cout << "检测到YOLOv8系列模型" << std::endl;
+        return YOLOV8;
+    }
+    // 判断是否包含yolov5关键字
+    else if (name_lower.find("yolov5") != std::string::npos) {
+        std::cout << "检测到YOLOv5系列模型" << std::endl;
+        return YOLOV5;
+    } 
+    // 默认判断为YOLOv5
+    else {
+        std::cout << "未明确指定模型类型，默认为YOLOv5模型" << std::endl;
+        return YOLOV5;
+    }
 }
 
 BPU_Detect::~BPU_Detect()
@@ -33,17 +67,29 @@ BPU_Detect::~BPU_Detect()
 
 bool BPU_Detect::Model_Anchor_Init()
 {
-    for(int i = 0; i < 3; i++) {
-        s_anchors_.push_back({anchors[i*2], anchors[i*2+1]});
-        m_anchors_.push_back({anchors[i*2+6], anchors[i*2+7]});
-        l_anchors_.push_back({anchors[i*2+12], anchors[i*2+13]});
+    s_anchors_.clear();
+    m_anchors_.clear();
+    l_anchors_.clear();
+    
+    // 如果是YOLOv5，使用标准的YOLOv5锚点
+    if (model_type_ == YOLOV5) {
+        for(int i = 0; i < 3; i++) {
+            s_anchors_.push_back({anchors[i*2], anchors[i*2+1]});
+            m_anchors_.push_back({anchors[i*2+6], anchors[i*2+7]});
+            l_anchors_.push_back({anchors[i*2+12], anchors[i*2+13]});
+        }
+    } 
+    // 如果是YOLO11或YOLOv8，不需要anchors，因为它们是anchor-free模型
+    else if (model_type_ == YOLO11 || model_type_ == YOLOV8) {
+        std::cout << "YOLO11/YOLOv8模型不使用预定义的锚点，它们是anchor-free模型" << std::endl;
     }
+    
     return true;
 }
 
 bool BPU_Detect::Model_Load()
 {
-    const char* model_file_name = model_path_.c_str(); //获取文件路径字符指针
+    const char* model_file_name = model_path_.c_str(); 
     if(model_file_name == nullptr)
     {
         std::cout << "model file name is nullptr" << std::endl;
@@ -51,52 +97,162 @@ bool BPU_Detect::Model_Load()
     }
     RDK_CHECK_SUCCESS(
         hbDNNInitializeFromFiles(&packed_dnn_handle_, &model_file_name, 1),
-        "Initialize model from file failed");//调用模型加载API
+        "Initialize model from file failed");
     return true;
 
 }
 
 bool BPU_Detect::Model_Output_Order()
 {
-    if (task_type_ == "detection"){
-    // 初始化默认顺序
-    output_order_[0] = 0;  // 默认第1个输出
-    output_order_[1] = 1;  // 默认第2个输出
-    output_order_[2] = 2;  // 默认第3个输出
-    // 定义期望的输出特征图尺寸和通道数
-    int32_t expected_shapes[3][3] = {
-        {H_8,  W_8,  3 * (5 + classes_num_)},   // 小目标特征图: H/8 x W/8
-        {H_16, W_16, 3 * (5 + classes_num_)},   // 中目标特征图: H/16 x W/16
-        {H_32, W_32, 3 * (5 + classes_num_)}    // 大目标特征图: H/32 x W/32
-    };
-    // 遍历每个期望的输出尺度
-    for(int i = 0; i < 3; i++) {
-        // 遍历实际的输出节点
-        for(int j = 0; j < 3; j++) {
-            hbDNNTensorProperties output_properties;// 获取当前输出节点的属性
-            RDK_CHECK_SUCCESS(
-                hbDNNGetOutputTensorProperties(&output_properties, dnn_handle_, j),
-                "Get output tensor properties failed");
-            // 获取实际的特征图尺寸和通道数
-            int32_t actual_h = output_properties.validShape.dimensionSize[1];
-            int32_t actual_w = output_properties.validShape.dimensionSize[2];
-            int32_t actual_c = output_properties.validShape.dimensionSize[3];
-            // 如果实际尺寸和通道数与期望的匹配
-            if(actual_h == expected_shapes[i][0] && 
-            actual_w == expected_shapes[i][1] && 
-            actual_c == expected_shapes[i][2]) {
-                output_order_[i] = j;// 记录正确的输出顺序
-                break;
+    if (model_type_ == YOLOV5 && task_type_ == "detection") {
+        // 初始化默认顺序
+        output_order_[0] = 0;  // 默认第1个输出
+        output_order_[1] = 1;  // 默认第2个输出
+        output_order_[2] = 2;  // 默认第3个输出
+        // 定义期望的输出特征图尺寸和通道数
+        int32_t expected_shapes[3][3] = {
+            {H_8,  W_8,  3 * (5 + classes_num_)},   // 小目标特征图: H/8 x W/8
+            {H_16, W_16, 3 * (5 + classes_num_)},   // 中目标特征图: H/16 x W/16
+            {H_32, W_32, 3 * (5 + classes_num_)}    // 大目标特征图: H/32 x W/32
+        };
+        for(int i = 0; i < 3; i++) {
+            for(int j = 0; j < 3; j++) {
+                hbDNNTensorProperties output_properties;
+                RDK_CHECK_SUCCESS(
+                    hbDNNGetOutputTensorProperties(&output_properties, dnn_handle_, j),
+                    "Get output tensor properties failed");
+
+                int32_t actual_h = output_properties.validShape.dimensionSize[1];
+                int32_t actual_w = output_properties.validShape.dimensionSize[2];
+                int32_t actual_c = output_properties.validShape.dimensionSize[3];
+
+                if(actual_h == expected_shapes[i][0] && 
+                actual_w == expected_shapes[i][1] && 
+                actual_c == expected_shapes[i][2]) {
+                    output_order_[i] = j;
+                    break;
+                    }
+                }
+            }
+
+            std::cout << "\n============ Output Order Mapping for YOLOv5 ============" << std::endl;
+            std::cout << "Small object  (1/" << 8  << "): output[" << output_order_[0] << "]" << std::endl;
+            std::cout << "Medium object (1/" << 16 << "): output[" << output_order_[1] << "]" << std::endl;
+            std::cout << "Large object  (1/" << 32 << "): output[" << output_order_[2] << "]" << std::endl;
+            std::cout << "=================================================\n" << std::endl;
+    }
+    else if (model_type_ == YOLO11 && task_type_ == "detection") {
+        // YOLO11有6个输出 - 初始化默认顺序
+        for (int i = 0; i < 6; i++) {
+            output_order_[i] = i;
+        }
+        
+        // 定义YOLO11期望的输出特征图属性
+        int32_t order_we_want[6][3] = {
+            {H_8, W_8, classes_num_},    // output[order[0]]: (1, H/8, W/8, CLASSES_NUM)
+            {H_8, W_8, 4 * REG},         // output[order[1]]: (1, H/8, W/8, 4*REG)
+            {H_16, W_16, classes_num_},  // output[order[2]]: (1, H/16, W/16, CLASSES_NUM)
+            {H_16, W_16, 4 * REG},       // output[order[3]]: (1, H/16, W/16, 4*REG)
+            {H_32, W_32, classes_num_},  // output[order[4]]: (1, H/32, W/32, CLASSES_NUM)
+            {H_32, W_32, 4 * REG}        // output[order[5]]: (1, H/32, W/32, 4*REG)
+        };
+        
+        // 遍历每个期望的输出
+        for (int i = 0; i < 6; i++) {
+            for (int j = 0; j < 6; j++) {
+                hbDNNTensorProperties output_properties;
+                RDK_CHECK_SUCCESS(
+                    hbDNNGetOutputTensorProperties(&output_properties, dnn_handle_, j),
+                    "Get output tensor properties failed");
+                int32_t h = output_properties.validShape.dimensionSize[1];
+                int32_t w = output_properties.validShape.dimensionSize[2];
+                int32_t c = output_properties.validShape.dimensionSize[3];
+                if (h == order_we_want[i][0] && w == order_we_want[i][1] && c == order_we_want[i][2]) {
+                    output_order_[i] = j;
+                    break;
                 }
             }
         }
-        // 打印输出顺序映射信息
-        std::cout << "\n============ Output Order Mapping ============" << std::endl;
-        std::cout << "Small object  (1/" << 8  << "): output[" << output_order_[0] << "]" << std::endl;
-        std::cout << "Medium object (1/" << 16 << "): output[" << output_order_[1] << "]" << std::endl;
-        std::cout << "Large object  (1/" << 32 << "): output[" << output_order_[2] << "]" << std::endl;
-        std::cout << "==========================================\n" << std::endl;
+        
+        // 检查输出顺序映射是否有效
+        int sum = 0;
+        for (int i = 0; i < 6; i++) {
+            sum += output_order_[i];
+        }
+        
+        if (sum == 0 + 1 + 2 + 3 + 4 + 5) {
+            std::cout << "\n============ Output Order Mapping for YOLO11 ============" << std::endl;
+            std::cout << "S-cls (1/" << 8  << "): output[" << output_order_[0] << "]" << std::endl;
+            std::cout << "S-box (1/" << 8  << "): output[" << output_order_[1] << "]" << std::endl;
+            std::cout << "M-cls (1/" << 16 << "): output[" << output_order_[2] << "]" << std::endl;
+            std::cout << "M-box (1/" << 16 << "): output[" << output_order_[3] << "]" << std::endl;
+            std::cout << "L-cls (1/" << 32 << "): output[" << output_order_[4] << "]" << std::endl;
+            std::cout << "L-box (1/" << 32 << "): output[" << output_order_[5] << "]" << std::endl;
+            std::cout << "==================================================\n" << std::endl;
+        } else {
+            std::cout << "YOLO11输出顺序检查失败，使用默认顺序" << std::endl;
+            for (int i = 0; i < 6; i++) {
+                output_order_[i] = i;
+            }
+        }
     }
+    else if (model_type_ == YOLOV8 && task_type_ == "detection") {
+        // YOLOv8有6个输出 - 初始化默认顺序
+        for (int i = 0; i < 6; i++) {
+            output_order_[i] = i;
+        }
+        
+        // 定义YOLOv8期望的输出特征图属性，参考main.cc中的结构
+        int32_t order_we_want[6][3] = {
+            {H_8, W_8, 64},             // output[order[0]]: (1, H/8, W/8, 64)
+            {H_16, W_16, 64},           // output[order[1]]: (1, H/16, W/16, 64)
+            {H_32, W_32, 64},           // output[order[2]]: (1, H/32, W/32, 64)
+            {H_8, W_8, classes_num_},   // output[order[3]]: (1, H/8, W/8, classes_num_)
+            {H_16, W_16, classes_num_}, // output[order[4]]: (1, H/16, W/16, classes_num_)
+            {H_32, W_32, classes_num_}, // output[order[5]]: (1, H/32, W/32, classes_num_)
+        };
+        
+        // 遍历每个期望的输出
+        for (int i = 0; i < 6; i++) {
+            for (int j = 0; j < 6; j++) {
+                hbDNNTensorProperties output_properties;
+                RDK_CHECK_SUCCESS(
+                    hbDNNGetOutputTensorProperties(&output_properties, dnn_handle_, j),
+                    "Get output tensor properties failed");
+                int32_t h = output_properties.validShape.dimensionSize[1];
+                int32_t w = output_properties.validShape.dimensionSize[2];
+                int32_t c = output_properties.validShape.dimensionSize[3];
+                
+                if (h == order_we_want[i][0] && w == order_we_want[i][1] && c == order_we_want[i][2]) {
+                    output_order_[i] = j;
+                    break;
+                }
+            }
+        }
+        
+        // 检查输出顺序映射是否有效
+        int sum = 0;
+        for (int i = 0; i < 6; i++) {
+            sum += output_order_[i];
+        }
+        
+        if (sum == 0 + 1 + 2 + 3 + 4 + 5) {
+            std::cout << "\n============ Output Order Mapping for YOLOv8 ============" << std::endl;
+            std::cout << "S-reg (1/" << 8  << "): output[" << output_order_[0] << "]" << std::endl;
+            std::cout << "M-reg (1/" << 16 << "): output[" << output_order_[1] << "]" << std::endl;
+            std::cout << "L-reg (1/" << 32 << "): output[" << output_order_[2] << "]" << std::endl;
+            std::cout << "S-cls (1/" << 8  << "): output[" << output_order_[3] << "]" << std::endl;
+            std::cout << "M-cls (1/" << 16 << "): output[" << output_order_[4] << "]" << std::endl;
+            std::cout << "L-cls (1/" << 32 << "): output[" << output_order_[5] << "]" << std::endl;
+            std::cout << "==================================================\n" << std::endl;
+        } else {
+            std::cout << "YOLOv8输出顺序检查失败，使用默认顺序" << std::endl;
+            for (int i = 0; i < 6; i++) {
+                output_order_[i] = i;
+            }
+        }
+    }
+    
     return true;
 }
 
@@ -108,15 +264,15 @@ bool BPU_Detect::Model_Info_check()
         hbDNNGetModelNameList(&model_name_list, &model_count, packed_dnn_handle_),
         "hbDNNGetModelNameList failed");
     if(model_count > 1) {
-    std::cout << "Model count: " << model_count << std::endl;
-    std::cout << "Please check the model count!" << std::endl;
-    return false;
+        std::cout << "Model count: " << model_count << std::endl;
+        std::cout << "Please check the model count!" << std::endl;
+        return false;
     }
     model_name_ = model_name_list[0];
 
     RDK_CHECK_SUCCESS(
-    hbDNNGetModelHandle(&dnn_handle_, packed_dnn_handle_, model_name_.c_str()),
-    "hbDNNGetModelHandle failed");
+        hbDNNGetModelHandle(&dnn_handle_, packed_dnn_handle_, model_name_.c_str()),
+        "hbDNNGetModelHandle failed");
 
     // 获取输入信息
     int32_t input_count = 0;
@@ -184,13 +340,25 @@ bool BPU_Detect::Model_Info_check()
         return false;
     }
 
-    int32_t output_count = 0;
+    // 获取输出节点数量
     RDK_CHECK_SUCCESS(
-        hbDNNGetOutputCount(&output_count, dnn_handle_),
+        hbDNNGetOutputCount(&output_count_, dnn_handle_),
         "hbDNNGetOutputCount failed");
 
-    output_tensors_ = new hbDNNTensor[output_count];
-    memset(output_tensors_, 0, sizeof(hbDNNTensor) * output_count);  // 初始化为0
+    // 根据模型类型检查输出数量
+    if (model_type_ == YOLOV5 && output_count_ != 3) {
+        std::cout << "YOLOv5模型应该有3个输出，但实际有" << output_count_ << "个输出" << std::endl;
+        return false;
+    } else if (model_type_ == YOLO11 && output_count_ != 6) {
+        std::cout << "YOLO11模型应该有6个输出，但实际有" << output_count_ << "个输出" << std::endl;
+        return false;
+    } else if (model_type_ == YOLOV8 && output_count_ != 6) {
+        std::cout << "YOLOv8模型应该有6个输出，但实际有" << output_count_ << "个输出" << std::endl;
+        return false;
+    }
+
+    output_tensors_ = new hbDNNTensor[output_count_];
+    memset(output_tensors_, 0, sizeof(hbDNNTensor) * output_count_);  // 初始化为0
 
     if (!Model_Output_Order()){
         std::cout << "输出顺序映射调整失败，请检查！" << std::endl;
@@ -253,7 +421,7 @@ bool BPU_Detect::Model_Detector()
     // 初始化输入tensor属性
     input_tensor_.properties = input_properties_;
     // 获取输出tensor属性
-    for(int i = 0; i < 3; i++) {
+    for(int i = 0; i < output_count_; i++) {
         hbDNNTensorProperties output_properties;
         RDK_CHECK_SUCCESS(
             hbDNNGetOutputTensorProperties(&output_properties, dnn_handle_, i),
@@ -277,7 +445,6 @@ bool BPU_Detect::Model_Detector()
         "Wait task done failed");
         
     return true;
-
 }
 
 // 特征图处理辅助函数
@@ -381,8 +548,26 @@ bool BPU_Detect::Model_Classification_Postprocess()
 bool BPU_Detect::Model_Postprocess()
 {
     if(task_type_ == "detection"){
-        if(!Model_Detection_Postprocess()){
-            std::cout << "Detection postprocess failed" << std::endl;
+        if (model_type_ == YOLOV5) {
+            if(!Model_Detection_Postprocess()){
+                std::cout << "YOLOv5 detection postprocess failed" << std::endl;
+                return false;
+            }
+        }
+        else if (model_type_ == YOLO11) {
+            if(!Model_Detection_Postprocess_YOLO11()){
+                std::cout << "YOLO11 detection postprocess failed" << std::endl;
+                return false;
+            }
+        }
+        else if (model_type_ == YOLOV8) {
+            if(!Model_Detection_Postprocess_YOLOV8()){
+                std::cout << "YOLOv8 detection postprocess failed" << std::endl;
+                return false;
+            }
+        }
+        else {
+            std::cout << "Unknown model type for detection task" << std::endl;
             return false;
         }
     }
@@ -554,67 +739,9 @@ float BPU_Detect::CalculateIoU(const BBoxInfo& box1, const BBoxInfo& box2) {
     return intersection_area / union_area;
 }
 
-// 从JSON文件加载标注数据
+// 从JSON文件加载标注数据 - 简化为调用GroundTruthLoader
 bool BPU_Detect::LoadGroundTruthData() {
-    // 检查标注文件路径是否为空
-    if (label_path_.empty()) {
-        printf("Label path is empty, skipping ground truth data loading\n");
-        return false;
-    }
-    
-    // 尝试打开标注文件
-    std::ifstream file(label_path_);
-    if (!file.is_open()) {
-        printf("Failed to open label file: %s\n", label_path_.c_str());
-        return false;
-    }
-    
-    // 解析JSON
-    try {
-        nlohmann::json label_json;
-        file >> label_json;
-        file.close();
-        
-        // 清空之前的标注数据
-        gt_boxes_.clear();
-        
-        // 检查JSON格式
-        if (label_json.contains("annotations")) {
-            auto annotations = label_json["annotations"];
-            for (const auto& anno : annotations) {
-                if (anno.contains("bbox") && anno.contains("category_id")) {
-                    BBoxInfo box;
-                    std::vector<float> bbox = anno["bbox"];
-                    
-                    // 标注格式可能是[x, y, width, height]或[x1, y1, x2, y2]
-                    // 这里假设格式是[x, y, width, height]
-                    if (bbox.size() >= 4) {
-                        box.x = bbox[0] + bbox[2]/2; // 转换为中心点x坐标
-                        box.y = bbox[1] + bbox[3]/2; // 转换为中心点y坐标
-                        box.width = bbox[2];
-                        box.height = bbox[3];
-                        box.class_id = anno["category_id"];
-                        box.confidence = 1.0f; // 标注数据的置信度设为1
-                        
-                        // 如果有类别名称映射，可以设置class_name
-                        box.class_name = class_names_[box.class_id % class_names_.size()];
-                        
-                        gt_boxes_.push_back(box);
-                    }
-                }
-            }
-            printf("Loaded %zu ground truth boxes from %s\n", gt_boxes_.size(), label_path_.c_str());
-            return true;
-        } else {
-            printf("Invalid label JSON format, missing 'annotations' field\n");
-            return false;
-        }
-    } catch (const std::exception& e) {
-        printf("Error parsing label JSON: %s\n", e.what());
-        return false;
-    }
-    
-    return false;
+    return GroundTruthLoader::LoadFromJson(label_path_, gt_boxes_, class_names_);
 }
 
 // 计算评估指标
@@ -630,22 +757,38 @@ void BPU_Detect::CalculateMetrics(InferenceResult& result) {
     bool has_gt_data = LoadGroundTruthData();
     
     if (task_type_ == "detection" && has_gt_data && !gt_boxes_.empty()) {
-        // 收集所有检测结果
+        // 获取原始图像尺寸（用于将像素坐标转换为归一化坐标）
+        float img_width = (float)input_img_.cols;
+        float img_height = (float)input_img_.rows;
+        
+        // 收集所有检测结果，并将像素坐标转换为归一化坐标以匹配YOLO格式
         std::vector<BBoxInfo> pred_boxes;
         for (int cls_id = 0; cls_id < classes_num_; cls_id++) {
             for (size_t i = 0; i < indices_[cls_id].size(); i++) {
                 int idx = indices_[cls_id][i];
                 float confidence = scores_[cls_id][idx];
-                float centerX = bboxes_[cls_id][idx].x + bboxes_[cls_id][idx].width / 2;
-                float centerY = bboxes_[cls_id][idx].y + bboxes_[cls_id][idx].height / 2;
-                float width = bboxes_[cls_id][idx].width;
-                float height = bboxes_[cls_id][idx].height;
+                
+                // 获取原始图像中的像素坐标
+                float x1 = (bboxes_[cls_id][idx].x - x_shift_) / x_scale_;
+                float y1 = (bboxes_[cls_id][idx].y - y_shift_) / y_scale_;
+                float width = bboxes_[cls_id][idx].width / x_scale_;
+                float height = bboxes_[cls_id][idx].height / y_scale_;
+                
+                // 计算中心点坐标
+                float centerX = x1 + width / 2;
+                float centerY = y1 + height / 2;
+                
+                // 转换为归一化坐标（0-1范围）
+                float norm_centerX = centerX / img_width;
+                float norm_centerY = centerY / img_height;
+                float norm_width = width / img_width;
+                float norm_height = height / img_height;
                 
                 BBoxInfo box;
-                box.x = centerX;
-                box.y = centerY;
-                box.width = width;
-                box.height = height;
+                box.x = norm_centerX;
+                box.y = norm_centerY;
+                box.width = norm_width;
+                box.height = norm_height;
                 box.class_id = cls_id;
                 box.class_name = class_names_[cls_id];
                 box.confidence = confidence;
@@ -774,82 +917,22 @@ void BPU_Detect::CalculateMetrics(InferenceResult& result) {
 }
 
 bool BPU_Detect::Model_Result_Save(InferenceResult& result) {
-    // 生成结果图像路径
-    std::string image_path = output_path_ + "result_" + task_id_ + ".jpg";
-    
-    // 保存结果图像
-    if (!cv::imwrite(image_path, output_img_)) {
-        std::cerr << "保存结果图像失败: " << image_path << std::endl;
-        return false;
-    }
-    
-    result.result_path = image_path;
-    std::cout << "结果图像已保存至: " << image_path << std::endl;
-    
-    // 生成JSON结果文件
-    nlohmann::json result_json;
-    result_json["task_id"] = task_id_;
-    result_json["model_name"] = model_name_;
-    result_json["task_type"] = task_type_;
-    result_json["performance"] = {
-        {"fps", result.fps},
-        {"preprocess_time", result.preprocess_time},
-        {"inference_time", result.inference_time},
-        {"postprocess_time", result.postprocess_time},
-        {"total_time", result.total_time}
-    };
-    result_json["metrics"] = {
-        {"precision", result.precision},
-        {"recall", result.recall},
-        {"mAP50", result.mAP50},
-        {"mAP50-95", result.mAP50_95}
-    };
-    
-    // 添加检测结果
-    if (task_type_ == "detection") {
-        nlohmann::json detections = nlohmann::json::array();
-        for (int cls_id = 0; cls_id < classes_num_; cls_id++) {
-            for (size_t i = 0; i < indices_[cls_id].size(); i++) {
-                int idx = indices_[cls_id][i];
-                
-                // 获取原始图像中的坐标
-                float x1 = (bboxes_[cls_id][idx].x - x_shift_) / x_scale_;
-                float y1 = (bboxes_[cls_id][idx].y - y_shift_) / y_scale_;
-                float width = bboxes_[cls_id][idx].width / x_scale_;
-                float height = bboxes_[cls_id][idx].height / y_scale_;
-                float confidence = scores_[cls_id][idx];
-                
-                nlohmann::json detection;
-                detection["class_id"] = cls_id;
-                detection["class_name"] = (cls_id < static_cast<int>(class_names_.size())) ? 
-                                        class_names_[cls_id] : "class" + std::to_string(cls_id);
-                detection["confidence"] = confidence;
-                detection["bbox"] = {
-                    {"x", x1},
-                    {"y", y1},
-                    {"width", width},
-                    {"height", height}
-                };
-                
-                detections.push_back(detection);
-            }
-        }
-        result_json["detections"] = detections;
-    }
-    
-    // 保存JSON结果
-    std::string json_path = output_path_ + "result_" + task_id_ + ".json";
-    std::ofstream json_file(json_path);
-    if (json_file.is_open()) {
-        json_file << std::setw(4) << result_json << std::endl;
-        json_file.close();
-        std::cout << "结果JSON已保存至: " << json_path << std::endl;
-    } else {
-        std::cerr << "无法保存JSON结果: " << json_path << std::endl;
-        return false;
-    }
-    
-    return true;
+    return ResultSaver::SaveResults(
+        output_path_,
+        task_id_,
+        model_name_,
+        task_type_,
+        output_img_,
+        bboxes_,
+        scores_,
+        indices_,
+        class_names_,
+        x_scale_,
+        y_scale_,
+        x_shift_,
+        y_shift_,
+        result
+    );
 }
 
 bool BPU_Detect::Model_Init(){
@@ -907,13 +990,13 @@ bool BPU_Detect::Model_Release() {
         }
         
         // 释放输出内存
-        for(int i = 0; i < 3; i++) {
-            if(output_tensors_ && output_tensors_[i].sysMem[0].virAddr) {
-                hbSysFreeMem(&(output_tensors_[i].sysMem[0]));
+        if (output_tensors_) {
+            for(int i = 0; i < output_count_; i++) {
+                if(output_tensors_[i].sysMem[0].virAddr) {
+                    hbSysFreeMem(&(output_tensors_[i].sysMem[0]));
+                }
             }
-        }
-        
-        if(output_tensors_) {
+            
             delete[] output_tensors_;
             output_tensors_ = nullptr;
         }
@@ -930,4 +1013,285 @@ bool BPU_Detect::Model_Release() {
     is_initialized_ = false;
     return true;
 }
+
+// YOLO11特征图处理函数
+void BPU_Detect::Model_Process_FeatureMap_YOLO11(hbDNNTensor& cls_tensor, 
+                                               hbDNNTensor& bbox_tensor,
+                                               int feature_h, 
+                                               int feature_w) {
+    float conf_thres_raw = -log(1 / score_threshold_ - 1);
+    
+    // 检查量化类型
+    if (cls_tensor.properties.quantiType != NONE) {
+        std::cout << "YOLO11 类别输出量化类型应为NONE!" << std::endl;
+        return;
+    }
+    if (bbox_tensor.properties.quantiType != SCALE) {
+        std::cout << "YOLO11 边界框输出量化类型应为SCALE!" << std::endl;
+        return;
+    }
+    
+    // 刷新内存
+    hbSysFlushMem(&cls_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
+    hbSysFlushMem(&bbox_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
+    
+    // 获取输出数据指针
+    auto* cls_raw = reinterpret_cast<float*>(cls_tensor.sysMem[0].virAddr);
+    auto* bbox_raw = reinterpret_cast<int32_t*>(bbox_tensor.sysMem[0].virAddr);
+    auto* bbox_scale = reinterpret_cast<float*>(bbox_tensor.properties.scale.scaleData);
+    
+    // 计算stride
+    float stride = 0;
+    if (feature_h == H_8) stride = 8.0;
+    else if (feature_h == H_16) stride = 16.0;
+    else if (feature_h == H_32) stride = 32.0;
+    
+    // 遍历特征图
+    for (int h = 0; h < feature_h; h++) {
+        for (int w = 0; w < feature_w; w++) {
+            // 获取当前位置的分类得分和边界框数据
+            float* cur_cls_raw = cls_raw;
+            int32_t* cur_bbox_raw = bbox_raw;
+            cls_raw += classes_num_;
+            bbox_raw += 4 * REG;
+            
+            // 找到最高分类得分
+            int cls_id = 0;
+            for (int i = 1; i < classes_num_; i++) {
+                if (cur_cls_raw[i] > cur_cls_raw[cls_id]) {
+                    cls_id = i;
+                }
+            }
+            
+            // 阈值过滤
+            if (cur_cls_raw[cls_id] < conf_thres_raw) {
+                continue;
+            }
+            
+            // 计算得分
+            float score = 1.0f / (1.0f + std::exp(-cur_cls_raw[cls_id]));
+            
+            // DFL计算 - 解码边界框
+            float ltrb[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+            for (int i = 0; i < 4; i++) {
+                float sum = 0.0f;
+                for (int j = 0; j < REG; j++) {
+                    float dfl = std::exp(float(cur_bbox_raw[REG * i + j]) * bbox_scale[j]);
+                    ltrb[i] += dfl * j;
+                    sum += dfl;
+                }
+                ltrb[i] /= sum;
+            }
+            
+            // 过滤无效框
+            if (ltrb[2] + ltrb[0] <= 0 || ltrb[3] + ltrb[1] <= 0) {
+                continue;
+            }
+            
+            // 计算边界框坐标
+            float x1 = (w + 0.5f - ltrb[0]) * stride;
+            float y1 = (h + 0.5f - ltrb[1]) * stride;
+            float x2 = (w + 0.5f + ltrb[2]) * stride;
+            float y2 = (h + 0.5f + ltrb[3]) * stride;
+            
+            // 添加到检测结果
+            bboxes_[cls_id].push_back(cv::Rect2d(x1, y1, x2 - x1, y2 - y1));
+            scores_[cls_id].push_back(score);
+        }
+    }
+}
+
+// YOLO11专用后处理
+bool BPU_Detect::Model_Detection_Postprocess_YOLO11() {
+    // 清空并预分配存储空间
+    bboxes_.clear();
+    scores_.clear();
+    indices_.clear();
+    
+    bboxes_.resize(classes_num_);
+    scores_.resize(classes_num_);
+    indices_.resize(classes_num_);
+    
+    // 处理小目标特征图
+    Model_Process_FeatureMap_YOLO11(
+        output_tensors_[output_order_[0]], // 类别输出
+        output_tensors_[output_order_[1]], // 边界框输出
+        H_8, W_8);
+        
+    // 处理中目标特征图
+    Model_Process_FeatureMap_YOLO11(
+        output_tensors_[output_order_[2]], // 类别输出
+        output_tensors_[output_order_[3]], // 边界框输出
+        H_16, W_16);
+        
+    // 处理大目标特征图
+    Model_Process_FeatureMap_YOLO11(
+        output_tensors_[output_order_[4]], // 类别输出
+        output_tensors_[output_order_[5]], // 边界框输出
+        H_32, W_32);
+    
+    // 对每个类别执行NMS
+    for (int i = 0; i < classes_num_; i++) {
+        if (!bboxes_[i].empty()) {
+            cv::dnn::NMSBoxes(bboxes_[i], scores_[i], score_threshold_, 
+                             nms_threshold_, indices_[i], 1.f, nms_top_k_);
+        }
+    }
+    
+    return true;
+}
+
+// YOLOv8特征图处理函数，参考main.cc中的处理逻辑
+void BPU_Detect::Model_Process_FeatureMap_YOLOV8(hbDNNTensor& reg_tensor,
+                                                int feature_h, 
+                                                int feature_w,
+                                                float stride) {
+    // 我们需要修改这个函数以处理两个输出tensor，一个是reg，一个是cls
+    int cls_index = -1;
+    int reg_index = -1;
+    
+    // 根据stride确定使用哪组输出张量
+    if (stride == 8.0f) {
+        // 小尺度特征图
+        reg_index = output_order_[0];
+        cls_index = output_order_[3];
+    } else if (stride == 16.0f) {
+        // 中尺度特征图
+        reg_index = output_order_[1];
+        cls_index = output_order_[4];
+    } else if (stride == 32.0f) {
+        // 大尺度特征图
+        reg_index = output_order_[2];
+        cls_index = output_order_[5];
+    }
+    
+    // 检查索引是否有效
+    if (reg_index < 0 || cls_index < 0 || reg_index >= output_count_ || cls_index >= output_count_) {
+        std::cout << "YOLOv8 无效的输出索引!" << std::endl;
+        return;
+    }
+    
+    // 获取reg和cls输出张量
+    hbDNNTensor& bbox_tensor = output_tensors_[reg_index];
+    hbDNNTensor& cls_tensor = output_tensors_[cls_index];
+    
+    // 检查反量化类型
+    if (bbox_tensor.properties.quantiType != SCALE) {
+        std::cout << "YOLOv8 bbox输出量化类型不是SCALE!" << std::endl;
+        return;
+    }
+    
+    if (cls_tensor.properties.quantiType != NONE) {
+        std::cout << "YOLOv8 cls输出量化类型不是NONE!" << std::endl;
+        return;
+    }
+    
+    // 刷新内存
+    hbSysFlushMem(&bbox_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
+    hbSysFlushMem(&cls_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
+    
+    // 获取数据指针
+    auto* bbox_raw = reinterpret_cast<int32_t*>(bbox_tensor.sysMem[0].virAddr);
+    auto* bbox_scale = reinterpret_cast<float*>(bbox_tensor.properties.scale.scaleData);
+    auto* cls_raw = reinterpret_cast<float*>(cls_tensor.sysMem[0].virAddr);
+    
+    // 阈值处理
+    float CONF_THRES_RAW = -log(1 / score_threshold_ - 1);
+    
+    // 遍历特征图的每个位置
+    for (int h = 0; h < feature_h; h++) {
+        for (int w = 0; w < feature_w; w++) {
+            // 获取当前位置的分类和边界框数据
+            float* cur_cls_raw = cls_raw + (h * feature_w + w) * classes_num_;
+            int32_t* cur_bbox_raw = bbox_raw + (h * feature_w + w) * (4 * REG);
+            
+            // 找到分数最大的类别
+            int cls_id = 0;
+            for (int i = 1; i < classes_num_; i++) {
+                if (cur_cls_raw[i] > cur_cls_raw[cls_id]) {
+                    cls_id = i;
+                }
+            }
+            
+            // 阈值过滤
+            if (cur_cls_raw[cls_id] < CONF_THRES_RAW) {
+                continue;
+            }
+            
+            // 计算置信度
+            float score = 1.0f / (1.0f + std::exp(-cur_cls_raw[cls_id]));
+            
+            // 使用DFL（Distribution Focal Loss）解码边界框
+            float ltrb[4], sum, dfl;
+            for (int i = 0; i < 4; i++) {
+                ltrb[i] = 0.0f;
+                sum = 0.0f;
+                
+                for (int j = 0; j < REG; j++) {
+                    dfl = std::exp(float(cur_bbox_raw[REG * i + j]) * bbox_scale[j]);
+                    ltrb[i] += dfl * j;
+                    sum += dfl;
+                }
+                
+                ltrb[i] /= sum;
+            }
+            
+            // 剔除无效的框
+            if (ltrb[2] + ltrb[0] <= 0 || ltrb[3] + ltrb[1] <= 0) {
+                continue;
+            }
+            
+            // 转换为xyxy格式
+            float x1 = (w + 0.5f - ltrb[0]) * stride;
+            float y1 = (h + 0.5f - ltrb[1]) * stride;
+            float x2 = (w + 0.5f + ltrb[2]) * stride;
+            float y2 = (h + 0.5f + ltrb[3]) * stride;
+            
+            // 添加到检测结果
+            bboxes_[cls_id].push_back(cv::Rect2d(x1, y1, x2 - x1, y2 - y1));
+            scores_[cls_id].push_back(score);
+        }
+    }
+}
+
+// YOLOv8专用后处理
+bool BPU_Detect::Model_Detection_Postprocess_YOLOV8() {
+    // 清空并预分配存储空间
+    bboxes_.clear();
+    scores_.clear();
+    indices_.clear();
+    
+    bboxes_.resize(classes_num_);
+    scores_.resize(classes_num_);
+    indices_.resize(classes_num_);
+    
+    // 处理小目标特征图
+    Model_Process_FeatureMap_YOLOV8(
+        output_tensors_[output_order_[0]], // 实际上不会使用这个参数
+        H_8, W_8,
+        8.0f);
+    
+    // 处理中目标特征图
+    Model_Process_FeatureMap_YOLOV8(
+        output_tensors_[output_order_[1]], // 实际上不会使用这个参数
+        H_16, W_16,
+        16.0f);
+    
+    // 处理大目标特征图
+    Model_Process_FeatureMap_YOLOV8(
+        output_tensors_[output_order_[2]], // 实际上不会使用这个参数
+        H_32, W_32,
+        32.0f);
+    
+    // 对每个类别执行NMS
+    for (int i = 0; i < classes_num_; i++) {
+        if (!bboxes_[i].empty()) {
+            cv::dnn::NMSBoxes(bboxes_[i], scores_[i], score_threshold_, 
+                             nms_threshold_, indices_[i], 1.f, nms_top_k_);
+        }
+    }
+    
+    return true;
+}
+
 

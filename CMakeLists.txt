@@ -47,6 +47,7 @@ link_directories(
 add_executable(main 
     src/model_node.cc
     src/detector.cc
+    src/config_json.cc
 )
 
 #step 10 链接依赖库
