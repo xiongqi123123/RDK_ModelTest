@@ -44,14 +44,14 @@ link_directories(
 )
 
 #step 9 添加源文件
-add_executable(main 
+add_executable(d_modelsquare_test 
     src/model_node.cc
     src/detector.cc
     src/config_json.cc
 )
 
 #step 10 链接依赖库
-target_link_libraries(main
+target_link_libraries(d_modelsquare_test
     ${OpenCV_LIBS}     # OpenCV库
     dnn                # RDK BPU库
     pthread            # 线程库
@@ -61,6 +61,6 @@ target_link_libraries(main
 )
 
 #step 11 安装目标（可选）
-install(TARGETS main
+install(TARGETS d_modelsquare_test
     RUNTIME DESTINATION bin
 )
