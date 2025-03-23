@@ -33,7 +33,7 @@
 *.app
 
 *.bin
-*.json
+*.txt
 *.jpg
 *.png
 *.jpeg
