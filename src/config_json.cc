@@ -83,12 +83,12 @@ bool ResultSaver::SaveResults(const std::string& output_path,
     
     // 保存结果图像
     if (!cv::imwrite(image_path, output_img)) {
-        std::cerr << "保存结果图像失败: " << image_path << std::endl;
+        std::cerr << "Failed to save result image: " << image_path << std::endl;
         return false;
     }
     
     result.result_path = image_path;
-    std::cout << "结果图像已保存至: " << image_path << std::endl;
+    std::cout << "Result image saved to: " << image_path << std::endl;
     
     // 生成JSON结果文件，按照指定的顺序创建
     nlohmann::json result_json;
@@ -183,9 +183,9 @@ bool ResultSaver::SaveResults(const std::string& output_path,
     if (json_file.is_open()) {
         json_file << std::setw(4) << ordered_json << std::endl;
         json_file.close();
-        std::cout << "结果JSON已保存至: " << json_path << std::endl;
+        std::cout << "Result JSON saved to: " << json_path << std::endl;
     } else {
-        std::cerr << "无法保存JSON结果: " << json_path << std::endl;
+        std::cerr << "Failed to save JSON results: " << json_path << std::endl;
         return false;
     }
     

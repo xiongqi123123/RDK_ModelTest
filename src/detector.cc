@@ -39,23 +39,23 @@ ModelType BPU_Detect::DetermineModelType(const std::string& model_name) {
     
     // 判断是否包含yolo11关键字
     if (name_lower.find("yolo11") != std::string::npos) {
-        std::cout << "检测到YOLO11系列模型" << std::endl;
+        std::cout << "DetermineModelType: YOLO11" << std::endl;
         return YOLO11;
     } 
     // 判断是否包含yolov8关键字
     else if (name_lower.find("yolov8") != std::string::npos) {
-        std::cout << "检测到YOLOv8系列模型" << std::endl;
+        std::cout << "DetermineModelType: YOLOV8" << std::endl;
         return YOLOV8;
     }
     // 判断是否包含yolov5关键字
     else if (name_lower.find("yolov5") != std::string::npos) {
-        std::cout << "检测到YOLOv5系列模型" << std::endl;
+        std::cout << "DetermineModelType: YOLOV5" << std::endl;
         return YOLOV5;
     } 
     // 默认判断为YOLOv5
     else {
-        std::cout << "未明确指定模型类型，默认为YOLOv5模型" << std::endl;
-        return YOLOV5;
+        std::cout << "DetermineModelType: UNKNOWN" << std::endl;
+        return UNKNOWN;
     }
 }
 
@@ -83,7 +83,7 @@ bool BPU_Detect::Model_Anchor_Init()
     } 
     // 如果是YOLO11或YOLOv8，不需要anchors，因为它们是anchor-free模型
     else if (model_type_ == YOLO11 || model_type_ == YOLOV8) {
-        std::cout << "YOLO11/YOLOv8模型不使用预定义的锚点，它们是anchor-free模型" << std::endl;
+        std::cout << "YOLO11/YOLOv8 model does not use predefined anchors, they are anchor-free models" << std::endl;
     }
     
     return true;
@@ -192,7 +192,7 @@ bool BPU_Detect::Model_Output_Order()
             std::cout << "L-box (1/" << 32 << "): output[" << output_order_[5] << "]" << std::endl;
             std::cout << "==================================================\n" << std::endl;
         } else {
-            std::cout << "YOLO11输出顺序检查失败，使用默认顺序" << std::endl;
+            std::cout << "YOLO11 output order check failed, using default order" << std::endl;
             for (int i = 0; i < 6; i++) {
                 output_order_[i] = i;
             }
@@ -248,7 +248,7 @@ bool BPU_Detect::Model_Output_Order()
             std::cout << "L-cls (1/" << 32 << "): output[" << output_order_[5] << "]" << std::endl;
             std::cout << "==================================================\n" << std::endl;
         } else {
-            std::cout << "YOLOv8输出顺序检查失败，使用默认顺序" << std::endl;
+            std::cout << "YOLOv8 output order check failed, using default order" << std::endl;
             for (int i = 0; i < 6; i++) {
                 output_order_[i] = i;
             }
@@ -283,7 +283,7 @@ bool BPU_Detect::Model_Info_check()
         "hbDNNGetInputCount failed");
 
     if(input_count > 1){
-        std::cout << "模型输入节点大于1，请检查！" << std::endl;
+        std::cout << "Model input nodes greater than 1, please check!" << std::endl;
         return false;
     }
 
@@ -293,19 +293,19 @@ bool BPU_Detect::Model_Info_check()
 
     //检查模型的输入类型
     if(input_properties_.validShape.numDimensions == 4){
-        std::cout << "输入tensor类型: HB_DNN_IMG_TYPE_NV12" << std::endl;
+        std::cout << "Input tensor type: HB_DNN_IMG_TYPE_NV12" << std::endl;
     }
     else{
-        std::cout << "输入tensor类型不是HB_DNN_IMG_TYPE_NV12，请检查！" << std::endl;
+        std::cout << "Input tensor type is not HB_DNN_IMG_TYPE_NV12, please check!" << std::endl;
         return false;
     }
 
     //检查模型的输入数据排布
     if(input_properties_.tensorType == 1){
-        std::cout << "输入tensor数据排布: HB_DNN_LAYOUT_NCHW" << std::endl;
+        std::cout << "Input tensor data layout: HB_DNN_LAYOUT_NCHW" << std::endl;
     }
     else{
-        std::cout << "输入tensor数据排布不是HB_DNN_LAYOUT_NCHW，请检查！" << std::endl;
+        std::cout << "Input tensor data layout is not HB_DNN_LAYOUT_NCHW, please check!" << std::endl;
         return false;
     }
 
@@ -314,31 +314,31 @@ bool BPU_Detect::Model_Info_check()
     input_w_ = input_properties_.validShape.dimensionSize[3];
     if (input_properties_.validShape.numDimensions == 4)
     {
-        std::cout << "输入的尺寸为: (" << input_properties_.validShape.dimensionSize[0];
+        std::cout << "Input size: (" << input_properties_.validShape.dimensionSize[0];
         std::cout << ", " << input_properties_.validShape.dimensionSize[1];
         std::cout << ", " << input_h_;
         std::cout << ", " << input_w_ << ")" << std::endl;
         if (task_type_ == "detection"){
             if(input_h_ == 640 && input_w_ == 640){
-                std::cout << "输入尺寸为640x640，符合检测任务要求" << std::endl;
+                std::cout << "Input size is 640x640, meet the detection task requirements" << std::endl;
             }
             else{
-                std::cout << "输入尺寸不符合检测任务要求，请检查！" << std::endl;
+                std::cout << "Input size does not meet the detection task requirements, please check!" << std::endl;
                 return false;
             }
         }
         else if(task_type_ == "classification"){
             if(input_h_ == 224 && input_w_ == 224){
-                std::cout << "输入尺寸为224x224，符合分类任务要求" << std::endl;
+                std::cout << "Input size is 224x224, meet the classification task requirements" << std::endl;
             }
             else{
-                std::cout << "输入尺寸不符合分类任务要求，请检查！" << std::endl;
+                std::cout << "Input size does not meet the classification task requirements, please check!" << std::endl;
                 return false;
             }
         }
     }
     else{
-        std::cout << "输入尺寸不符合要求，请检查！" << std::endl;
+        std::cout << "Input size does not meet the requirements, please check!" << std::endl;
         return false;
     }
 
@@ -349,13 +349,13 @@ bool BPU_Detect::Model_Info_check()
 
     // 根据模型类型检查输出数量
     if (model_type_ == YOLOV5 && output_count_ != 3) {
-        std::cout << "YOLOv5模型应该有3个输出，但实际有" << output_count_ << "个输出" << std::endl;
+        std::cout << "YOLOv5 model should have 3 outputs, but actually has " << output_count_ << " outputs" << std::endl;
         return false;
     } else if (model_type_ == YOLO11 && output_count_ != 6) {
-        std::cout << "YOLO11模型应该有6个输出，但实际有" << output_count_ << "个输出" << std::endl;
+        std::cout << "YOLO11 model should have 6 outputs, but actually has " << output_count_ << " outputs" << std::endl;
         return false;
     } else if (model_type_ == YOLOV8 && output_count_ != 6) {
-        std::cout << "YOLOv8模型应该有6个输出，但实际有" << output_count_ << "个输出" << std::endl;
+        std::cout << "YOLOv8 model should have 6 outputs, but actually has " << output_count_ << " outputs" << std::endl;
         return false;
     }
 
@@ -363,7 +363,7 @@ bool BPU_Detect::Model_Info_check()
     memset(output_tensors_, 0, sizeof(hbDNNTensor) * output_count_);  // 初始化为0
 
     if (!Model_Output_Order()){
-        std::cout << "输出顺序映射调整失败，请检查！" << std::endl;
+        std::cout << "Output order mapping adjustment failed, please check!" << std::endl;
         return false;
     }
 
@@ -811,14 +811,14 @@ void BPU_Detect::Model_Print() const {
                 std::string class_name = (idx < static_cast<int>(class_names_.size())) ? 
                                        class_names_[idx] : "class" + std::to_string(idx);
                 
-                std::cout << "排名 #" << (i + 1) << ": " << class_name 
-                          << " (ID: " << idx << "), 概率: " 
+                std::cout << "Rank #" << (i + 1) << ": " << class_name 
+                          << " (ID: " << idx << "), probability: " 
                           << std::fixed << std::setprecision(2) << probability * 100 << "%" << std::endl;
             }
             
             std::cout << "==============================================\n" << std::endl;
         } else {
-            std::cout << "\n没有找到有效的分类结果。\n" << std::endl;
+            std::cout << "\nNo valid classification results found.\n" << std::endl;
         }
     }
 }
@@ -863,12 +863,12 @@ bool BPU_Detect::Model_Inference(const cv::Mat& input_img, cv::Mat& output_img, 
     float fps = 1000.0f / total_time_; // 计算帧率
     
     // 打印性能信息
-    std::cout << "性能统计:" << std::endl;
-    std::cout << "- 前处理时间: " << total_preprocess_time_ << " ms" << std::endl;
-    std::cout << "- 推理时间: " << total_inference_time_ << " ms" << std::endl;
-    std::cout << "- 后处理时间: " << total_postprocess_time_ << " ms" << std::endl;
-    std::cout << "- 总时间: " << total_time_ << " ms" << std::endl;
-    std::cout << "- 帧率 (FPS): " << fps << std::endl;
+    std::cout << "Performance statistics:" << std::endl;
+    std::cout << "- Preprocessing time: " << total_preprocess_time_ << " ms" << std::endl;
+    std::cout << "- Inference time: " << total_inference_time_ << " ms" << std::endl;
+    std::cout << "- Postprocessing time: " << total_postprocess_time_ << " ms" << std::endl;
+    std::cout << "- Total time: " << total_time_ << " ms" << std::endl;
+    std::cout << "- FPS: " << fps << std::endl;
     
     // 绘制检测框
     Model_Draw();
@@ -951,7 +951,7 @@ void BPU_Detect::CalculateMetrics(InferenceResult& result) {
                     label_file.close();
                 }
             } catch (const std::exception& e) {
-                std::cerr << "读取标签文件时出错: " << e.what() << std::endl;
+                std::cerr << "Error reading label file: " << e.what() << std::endl;
             }
         }
         
@@ -976,8 +976,8 @@ void BPU_Detect::CalculateMetrics(InferenceResult& result) {
                 result.acc5 = in_top5 ? 1.0f : 0.0f;
             }
             
-            std::cout << "计算真实准确率 - Top-1: " << (in_top1 ? "正确" : "错误") 
-                     << ", Top-5: " << (in_top5 ? "正确" : "错误") << std::endl;
+            std::cout << "Calculate true accuracy - Top-1: " << (in_top1 ? "correct" : "incorrect") 
+                     << ", Top-5: " << (in_top5 ? "correct" : "incorrect") << std::endl;
         } else {
             // 没有真实标签，使用置信度估计
             if (!indices_[0].empty()) {
@@ -995,7 +995,7 @@ void BPU_Detect::CalculateMetrics(InferenceResult& result) {
                 result.acc5 = (count > 0) ? (sum_top5 / count) : 0.0f;
             }
             
-            std::cout << "使用置信度模拟准确率 - Top-1: " << (result.acc1 * 100.0f) << "%"
+            std::cout << "Simulate accuracy using confidence - Top-1: " << (result.acc1 * 100.0f) << "%"
                      << ", Top-5: " << (result.acc5 * 100.0f) << "%" << std::endl;
         }
     } 
@@ -1270,11 +1270,11 @@ void BPU_Detect::Model_Process_FeatureMap_YOLO11(hbDNNTensor& cls_tensor,
     
     // 检查量化类型
     if (cls_tensor.properties.quantiType != NONE) {
-        std::cout << "YOLO11 类别输出量化类型应为NONE!" << std::endl;
+        std::cout << "YOLO11 class output quantization type should be NONE!" << std::endl;
         return;
     }
     if (bbox_tensor.properties.quantiType != SCALE) {
-        std::cout << "YOLO11 边界框输出量化类型应为SCALE!" << std::endl;
+        std::cout << "YOLO11 bbox output quantization type should be SCALE!" << std::endl;
         return;
     }
     
@@ -1414,7 +1414,7 @@ void BPU_Detect::Model_Process_FeatureMap_YOLOV8(hbDNNTensor& reg_tensor,
     
     // 检查索引是否有效
     if (reg_index < 0 || cls_index < 0 || reg_index >= output_count_ || cls_index >= output_count_) {
-        std::cout << "YOLOv8 无效的输出索引!" << std::endl;
+        std::cout << "YOLOv8 invalid output index!" << std::endl;
         return;
     }
     
@@ -1424,12 +1424,12 @@ void BPU_Detect::Model_Process_FeatureMap_YOLOV8(hbDNNTensor& reg_tensor,
     
     // 检查反量化类型
     if (bbox_tensor.properties.quantiType != SCALE) {
-        std::cout << "YOLOv8 bbox输出量化类型不是SCALE!" << std::endl;
+        std::cout << "YOLOv8 bbox output quantization type is not SCALE!" << std::endl;
         return;
     }
     
     if (cls_tensor.properties.quantiType != NONE) {
-        std::cout << "YOLOv8 cls输出量化类型不是NONE!" << std::endl;
+        std::cout << "YOLOv8 cls output quantization type is not NONE!" << std::endl;
         return;
     }
     

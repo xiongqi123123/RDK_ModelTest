@@ -7,7 +7,7 @@
 bool ModelConfig::loadFromJson(const std::string& json_path) {
     std::ifstream file(json_path);
     if (!file.is_open()) {
-        std::cerr << "无法打开配置文件: " << json_path << std::endl;
+        std::cerr << "Failed to open configuration file: " << json_path << std::endl;
         return false;
     }
     
@@ -43,14 +43,14 @@ bool ModelConfig::loadFromJson(const std::string& json_path) {
         
         return true;
     } catch (const std::exception& e) {
-        std::cerr << "解析JSON配置文件失败: " << e.what() << std::endl;
+        std::cerr << "Failed to parse JSON configuration file: " << e.what() << std::endl;
         return false;
     }
 }
 
 void printUsage(const char* programName) {
-    std::cout << "用法: " << programName << " [配置文件路径]" << std::endl;
-    std::cout << "示例: " << programName << " dataset/input/input.json" << std::endl;
+    std::cout << "Usage: " << programName << " [configuration file path]" << std::endl;
+    std::cout << "Example: " << programName << " dataset/input/input.json" << std::endl;
 }
 
 int main(int argc, char *argv[])
