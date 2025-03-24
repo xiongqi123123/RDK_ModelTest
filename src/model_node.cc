@@ -167,10 +167,6 @@ void safePrintFloat(const char* prefix, float value) {
 
 int main(int argc, char *argv[])
 {
-    // 设置信号处理
-    signal(SIGINT, signal_handler);  // Ctrl+C
-    signal(SIGTERM, signal_handler); // 终止信号
-    signal(SIGSEGV, signal_handler); // 段错误
 
     if (argc < 2){
         printf("invalid arguments!\n");

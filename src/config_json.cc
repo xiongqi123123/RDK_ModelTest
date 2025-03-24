@@ -79,7 +79,6 @@ bool ResultSaver::SaveResults(const std::string& output_path,
                             const int y_shift,
                             InferenceResult& result,
                             const std::string& image_name) {
-    // 提取图片文件名作为JSON中的键（不包含路径和扩展名）
     std::string image_key = image_name;
     size_t last_slash = image_key.find_last_of("/\\");
     if (last_slash != std::string::npos) {
@@ -90,10 +89,7 @@ bool ResultSaver::SaveResults(const std::string& output_path,
         image_key = image_key.substr(0, last_dot);
     }
     
-    // 生成结果图像路径
     std::string image_path = output_path + "result_" + image_key + ".jpg";
-    
-    // 保存结果图像
     if (!cv::imwrite(image_path, output_img)) {
         std::cerr << "Failed to save result image: " << image_path << std::endl;
         return false;
@@ -101,11 +97,7 @@ bool ResultSaver::SaveResults(const std::string& output_path,
     
     result.result_path = image_path;
     std::cout << "Result image saved to: " << image_path << std::endl;
-    
-    // 准备JSON结果文件路径
     std::string json_path = output_path + "result_" + task_id + ".json";
-    
-    // 读取现有的JSON文件（如果存在）
     nlohmann::json result_json;
     bool json_exists = false;
     std::ifstream json_file_in(json_path);
@@ -115,13 +107,11 @@ bool ResultSaver::SaveResults(const std::string& output_path,
             json_exists = true;
         } catch (const std::exception& e) {
             std::cerr << "Warning: Failed to parse existing JSON file: " << e.what() << std::endl;
-            // 重新创建一个新的JSON对象
             result_json = nlohmann::json();
         }
         json_file_in.close();
     }
     
-    // 如果是新文件，添加基本信息
     if (!json_exists) {
         result_json["task_id"] = task_id;
         result_json["task_type"] = task_type;
@@ -133,8 +123,6 @@ bool ResultSaver::SaveResults(const std::string& output_path,
             {"postprocess_time", result.postprocess_time},
             {"total_time", result.total_time}
         };
-        
-        // 根据任务类型设置不同的指标
         if (task_type == "detection") {
             result_json["metrics"] = {
                 {"mAP50", result.mAP50},
@@ -159,12 +147,9 @@ bool ResultSaver::SaveResults(const std::string& output_path,
         perf["inference_time"] = perf["inference_time"].get<float>() * (1.0f - weight) + result.inference_time * weight;
         perf["postprocess_time"] = perf["postprocess_time"].get<float>() * (1.0f - weight) + result.postprocess_time * weight;
         perf["total_time"] = perf["total_time"].get<float>() * (1.0f - weight) + result.total_time * weight;
-        
-        // 更新处理图片数量
         result_json["processed_images"] = img_count + 1;
     }
     
-    // 添加检测结果
     if (task_type == "detection") {
         nlohmann::json detections = nlohmann::json::array();
         for (size_t cls_id = 0; cls_id < bboxes.size(); cls_id++) {
@@ -179,7 +164,6 @@ bool ResultSaver::SaveResults(const std::string& output_path,
                 float confidence = scores[cls_id][idx];
                 
                 nlohmann::json detection;
-                // 边界框信息
                 detection["bbox"] = {
                     {"x", x1},
                     {"y", y1},
@@ -196,9 +180,7 @@ bool ResultSaver::SaveResults(const std::string& output_path,
         }
         result_json["detections"][image_key] = detections;
     } else if (task_type == "classification") {
-        // 添加分类结果
         nlohmann::json classifications = nlohmann::json::array();
-        // 添加Top-5结果
         int top_count = std::min(5, static_cast<int>(indices[0].size()));
         
         for (int i = 0; i < top_count; i++) {
@@ -218,7 +200,6 @@ bool ResultSaver::SaveResults(const std::string& output_path,
         result_json["classifications"][image_key] = classifications;
     }
     
-    // 保存JSON结果
     std::ofstream json_file_out(json_path);
     if (json_file_out.is_open()) {
         json_file_out << std::setw(4) << result_json << std::endl;

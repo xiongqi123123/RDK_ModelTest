@@ -23,7 +23,6 @@ BPU_Detect::BPU_Detect(const std::string& model_name,
       task_handle_(nullptr),
       output_count_(0)
 {
-    // 确定模型类型
     if (task_type_ == "detection") {
         model_type_ = DetermineModelType(model_name);
     }
@@ -104,21 +103,19 @@ bool BPU_Detect::Model_Load()
 
 }
 
-// 计算特征图尺寸的函数实现
 void BPU_Detect::CalculateFeatureMapSizes(int input_height, int input_width) {
-    // 计算不同尺度的特征图尺寸
     H_8_ = input_height / 8;
     W_8_ = input_width / 8;
     H_16_ = input_height / 16;
     W_16_ = input_width / 16;
     H_32_ = input_height / 32;
     W_32_ = input_width / 32;
-    
     std::cout << "Calculated feature map sizes:" << std::endl;
     std::cout << "Small (1/8):  " << H_8_ << "x" << W_8_ << std::endl;
     std::cout << "Medium (1/16): " << H_16_ << "x" << W_16_ << std::endl;
     std::cout << "Large (1/32):  " << H_32_ << "x" << W_32_ << std::endl;
 }
+
 
 bool BPU_Detect::Model_Output_Order()
 {
@@ -380,7 +377,7 @@ bool BPU_Detect::Model_Info_check()
     }
 
     output_tensors_ = new hbDNNTensor[output_count_];
-    memset(output_tensors_, 0, sizeof(hbDNNTensor) * output_count_);  // 初始化为0
+    memset(output_tensors_, 0, sizeof(hbDNNTensor) * output_count_);
 
     if (!Model_Output_Order()){
         std::cout << "Output order mapping adjustment failed, please check!" << std::endl;
@@ -430,19 +427,15 @@ bool BPU_Detect::Model_Preprocess(const cv::Mat& input_img)
         *nv12++ = *u_data++;
         *nv12++ = *v_data++;
     }
-    // 将内存缓存清理，确保数据准备好可以供模型使用
-    hbSysFlushMem(&input_tensor_.sysMem[0], HB_SYS_MEM_CACHE_CLEAN);// 清除缓存，确保数据同步
+    hbSysFlushMem(&input_tensor_.sysMem[0], HB_SYS_MEM_CACHE_CLEAN);
 
     return true;
 }
 
 bool BPU_Detect::Model_Detector()
 {
-    // 初始化任务句柄为nullptr
     task_handle_ = nullptr;
-    // 初始化输入tensor属性
     input_tensor_.properties = input_properties_;
-    // 获取输出tensor属性
     for(int i = 0; i < output_count_; i++) {
         hbDNNTensorProperties output_properties;
         RDK_CHECK_SUCCESS(
@@ -466,7 +459,6 @@ bool BPU_Detect::Model_Detector()
         hbDNNWaitTaskDone(task_handle_, 0),
         "Wait task done failed");
     
-    // 完成推理后立即释放任务句柄
     if (task_handle_) {
         hbDNNReleaseTask(task_handle_);
         task_handle_ = nullptr;
@@ -475,12 +467,10 @@ bool BPU_Detect::Model_Detector()
     return true;
 }
 
-// 特征图处理辅助函数
 void BPU_Detect::Model_Process_FeatureMap(hbDNNTensor& output_tensor, 
                                   int height, int width,
                                   const std::vector<std::vector<float>>& anchors,
                                   float conf_thres_raw) {
-    // 检查量化类型
     if (output_tensor.properties.quantiType != NONE) {
         std::cout << "Output tensor quantization type should be NONE!" << std::endl;
         return;
