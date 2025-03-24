@@ -1,0 +1,86 @@
+{
+    "detections": [
+        {
+            "bbox": {
+                "height": 100.46846008300781,
+                "width": 98.0427017211914,
+                "x": 786.27099609375,
+                "y": 601.866455078125
+            },
+            "class_id": 0,
+            "class_name": "tennis",
+            "confidence": 0.5414549112319946
+        },
+        {
+            "bbox": {
+                "height": 117.03363037109375,
+                "width": 120.39384460449219,
+                "x": 1075.6336669921875,
+                "y": 574.4883422851563
+            },
+            "class_id": 0,
+            "class_name": "tennis",
+            "confidence": 0.520010769367218
+        },
+        {
+            "bbox": {
+                "height": 186.74295043945313,
+                "width": 193.60452270507813,
+                "x": 1211.6004638671875,
+                "y": 392.2587890625
+            },
+            "class_id": 0,
+            "class_name": "tennis",
+            "confidence": 0.4882376790046692
+        },
+        {
+            "bbox": {
+                "height": 119.15771484375,
+                "width": 116.11834716796875,
+                "x": 542.9351196289063,
+                "y": 551.606689453125
+            },
+            "class_id": 0,
+            "class_name": "tennis",
+            "confidence": 0.47785714268684387
+        },
+        {
+            "bbox": {
+                "height": 135.59417724609375,
+                "width": 136.67713928222656,
+                "x": 424.5551452636719,
+                "y": 495.7493591308594
+            },
+            "class_id": 0,
+            "class_name": "tennis",
+            "confidence": 0.47671812772750854
+        },
+        {
+            "bbox": {
+                "height": 93.0947036743164,
+                "width": 97.15386199951172,
+                "x": 467.2284240722656,
+                "y": 608.4816284179688
+            },
+            "class_id": 0,
+            "class_name": "tennis",
+            "confidence": 0.46087533235549927
+        }
+    ],
+    "metrics": {
+        "mAP50": 0.9090909957885742,
+        "mAP50-95": 0.636363685131073,
+        "precision": 1.0,
+        "recall": 1.0
+    },
+    "model_name": "tennis_detect_640x640_bayese_nv12",
+    "performance": {
+        "fps": 71.42857360839844,
+        "inference_time": 9.0,
+        "postprocess_time": 0.0,
+        "preprocess_time": 5.0,
+        "total_time": 14.0
+    },
+    "task_id": "1_85",
+    "task_type": "detection"
+}

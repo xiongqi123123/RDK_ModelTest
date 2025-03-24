@@ -123,35 +123,35 @@ void BPU_Detect::CalculateFeatureMapSizes(int input_height, int input_width) {
 bool BPU_Detect::Model_Output_Order()
 {
     if (model_type_ == YOLOV5 && task_type_ == "detection") {
-        // 初始化默认顺序
-        output_order_[0] = 0;  // 默认第1个输出
-        output_order_[1] = 1;  // 默认第2个输出
-        output_order_[2] = 2;  // 默认第3个输出
-        // 定义期望的输出特征图尺寸和通道数
-        int32_t expected_shapes[3][3] = {
+    // 初始化默认顺序
+    output_order_[0] = 0;  // 默认第1个输出
+    output_order_[1] = 1;  // 默认第2个输出
+    output_order_[2] = 2;  // 默认第3个输出
+    // 定义期望的输出特征图尺寸和通道数
+    int32_t expected_shapes[3][3] = {
             {H_8_,  W_8_,  3 * (5 + classes_num_)},   // 小目标特征图: H/8 x W/8
             {H_16_, W_16_, 3 * (5 + classes_num_)},   // 中目标特征图: H/16 x W/16
             {H_32_, W_32_, 3 * (5 + classes_num_)}    // 大目标特征图: H/32 x W/32
         };
-        for(int i = 0; i < 3; i++) {
-            for(int j = 0; j < 3; j++) {
+    for(int i = 0; i < 3; i++) {
+        for(int j = 0; j < 3; j++) {
                     hbDNNTensorProperties output_properties;
-                RDK_CHECK_SUCCESS(
-                    hbDNNGetOutputTensorProperties(&output_properties, dnn_handle_, j),
-                    "Get output tensor properties failed");
+            RDK_CHECK_SUCCESS(
+                hbDNNGetOutputTensorProperties(&output_properties, dnn_handle_, j),
+                "Get output tensor properties failed");
 
-                int32_t actual_h = output_properties.validShape.dimensionSize[1];
-                int32_t actual_w = output_properties.validShape.dimensionSize[2];
-                int32_t actual_c = output_properties.validShape.dimensionSize[3];
+            int32_t actual_h = output_properties.validShape.dimensionSize[1];
+            int32_t actual_w = output_properties.validShape.dimensionSize[2];
+            int32_t actual_c = output_properties.validShape.dimensionSize[3];
 
-                if(actual_h == expected_shapes[i][0] && 
-                actual_w == expected_shapes[i][1] && 
-                actual_c == expected_shapes[i][2]) {
+            if(actual_h == expected_shapes[i][0] && 
+            actual_w == expected_shapes[i][1] && 
+            actual_c == expected_shapes[i][2]) {
                         output_order_[i] = j;
-                    break;
-                    }
+                break;
                 }
             }
+        }
 
             std::cout << "\n============ Output Order Mapping for YOLOv5 ============" << std::endl;
         std::cout << "Small object  (1/" << 8  << "): output[" << output_order_[0] << "]" << std::endl;
@@ -356,8 +356,8 @@ bool BPU_Detect::Model_Info_check()
         //         return false;
         //     }
         // }
-    }
-    else{
+            }
+            else{
         std::cout << "Input size does not meet the requirements, please check!" << std::endl;
         return false;
     }

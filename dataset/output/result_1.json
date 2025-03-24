@@ -1,47 +1,47 @@
 {
     "classifications": [
         {
-            "class_id": 852,
-            "class_name": "tennis ball",
-            "confidence": 0.940414547920227,
+            "class_id": 75,
+            "class_name": "black widow, Latrodectus mactans",
+            "confidence": 1.0,
             "rank": 1
         },
         {
-            "class_id": 988,
-            "class_name": "acorn",
-            "confidence": 0.006568909157067537,
+            "class_id": 664,
+            "class_name": "monitor",
+            "confidence": 0.0,
             "rank": 2
         },
         {
-            "class_id": 952,
-            "class_name": "fig",
-            "confidence": 0.0037667176220566034,
+            "class_id": 671,
+            "class_name": "mountain bike, all-terrain bike, off-roader",
+            "confidence": 0.0,
             "rank": 3
         },
         {
-            "class_id": 951,
-            "class_name": "lemon",
-            "confidence": 0.0034662361722439528,
+            "class_id": 670,
+            "class_name": "motor scooter, scooter",
+            "confidence": 0.0,
             "rank": 4
         },
         {
-            "class_id": 948,
-            "class_name": "Granny Smith",
-            "confidence": 0.0018859084229916334,
+            "class_id": 669,
+            "class_name": "mosquito net",
+            "confidence": 0.0,
             "rank": 5
         }
     ],
     "metrics": {
-        "accuracy_top1": 0.940414547920227,
-        "accuracy_top5": 0.1912204623222351
+        "accuracy_top1": 0.0,
+        "accuracy_top5": 0.0
     },
     "model_name": "MobileNetv4-deploy_224x224_nv12",
     "performance": {
-        "fps": 142.85714721679688,
-        "inference_time": 2.0,
+        "fps": 250.0,
+        "inference_time": 0.0,
         "postprocess_time": 0.0,
-        "preprocess_time": 5.0,
-        "total_time": 7.0
+        "preprocess_time": 4.0,
+        "total_time": 4.0
     },
     "task_id": "1",
     "task_type": "classification"

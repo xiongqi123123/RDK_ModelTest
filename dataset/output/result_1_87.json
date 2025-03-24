@@ -1,0 +1,75 @@
+{
+    "detections": [
+        {
+            "bbox": {
+                "height": 158.89317321777344,
+                "width": 160.66744995117188,
+                "x": 1440.878662109375,
+                "y": 248.8751678466797
+            },
+            "class_id": 0,
+            "class_name": "tennis",
+            "confidence": 0.5176457166671753
+        },
+        {
+            "bbox": {
+                "height": 141.97679138183594,
+                "width": 137.84619140625,
+                "x": 962.0093994140625,
+                "y": 141.967529296875
+            },
+            "class_id": 0,
+            "class_name": "tennis",
+            "confidence": 0.5091131925582886
+        },
+        {
+            "bbox": {
+                "height": 148.0283966064453,
+                "width": 149.83160400390625,
+                "x": 470.00537109375,
+                "y": 175.37100219726563
+            },
+            "class_id": 0,
+            "class_name": "tennis",
+            "confidence": 0.5025421977043152
+        },
+        {
+            "bbox": {
+                "height": 172.9248504638672,
+                "width": 172.70327758789063,
+                "x": 1037.9581298828125,
+                "y": 399.9211120605469
+            },
+            "class_id": 0,
+            "class_name": "tennis",
+            "confidence": 0.4942702054977417
+        },
+        {
+            "bbox": {
+                "height": 203.79579162597656,
+                "width": 205.39747619628906,
+                "x": 877.2803344726563,
+                "y": 667.63623046875
+            },
+            "class_id": 0,
+            "class_name": "tennis",
+            "confidence": 0.48822930455207825
+        }
+    ],
+    "metrics": {
+        "mAP50": 0.9090909957885742,
+        "mAP50-95": 0.636363685131073,
+        "precision": 1.0,
+        "recall": 1.0
+    },
+    "model_name": "tennis_detect_640x640_bayese_nv12",
+    "performance": {
+        "fps": 76.92308044433594,
+        "inference_time": 8.0,
+        "postprocess_time": 0.0,
+        "preprocess_time": 5.0,
+        "total_time": 13.0
+    },
+    "task_id": "1_87",
+    "task_type": "detection"
+}
