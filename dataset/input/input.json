@@ -1,7 +1,7 @@
 {
     "task_id": "1",
     "task_type": "classification",
-    "model_name": "MobileNetV4_conv_medium",
+    "model_name": "MobileNetV4",
     "model_path": "/root/Working/d-modelsquare-test/dataset/input/MobileNetV4_conv_medium_224x224_nv12.bin",
     "classes_num": 1000,
     "classes_labels":[
@@ -1006,7 +1006,7 @@
         "ear, spike, capitulum",
         "toilet tissue, toilet paper, bathroom tissue"
     ],
-    "image_path": "/root/Working/d-modelsquare-test/dataset/input/tennis_1_frame_0002.jpg",
-    "label_path": "",
+    "image_path": "/root/Working/d-modelsquare-test/dataset/input/images/",
+    "label_path": "/root/Working/d-modelsquare-test/dataset/input/labels/",
     "output_path": "/root/Working/d-modelsquare-test/dataset/output"
 }

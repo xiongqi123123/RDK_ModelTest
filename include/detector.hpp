@@ -91,7 +91,7 @@ class BPU_Detect{
         ~BPU_Detect();
 
         bool Model_Init();
-        bool Model_Inference(const cv::Mat& input_img, cv::Mat& output_img, InferenceResult& result);
+        bool Model_Inference(const cv::Mat& input_img, cv::Mat& output_img, InferenceResult& result, const std::string& image_name);
         bool Model_Release();
         void SetClassNames(const std::vector<std::string>& class_names) { class_names_ = class_names; }
         void SetOutputPath(const std::string& output_path) { output_path_ = output_path; }
@@ -124,7 +124,7 @@ class BPU_Detect{
         bool Model_Postprocess();
         void Model_Draw();
         void Model_Print() const;
-        bool Model_Result_Save(InferenceResult& result);
+        bool Model_Result_Save(InferenceResult& result, const std::string& image_name);
         void CalculateMetrics(InferenceResult& result);
         bool LoadGroundTruthData();
         float CalculateIoU(const BBoxInfo& box1, const BBoxInfo& box2);

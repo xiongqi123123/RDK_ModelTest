@@ -465,6 +465,12 @@ bool BPU_Detect::Model_Detector()
     RDK_CHECK_SUCCESS(
         hbDNNWaitTaskDone(task_handle_, 0),
         "Wait task done failed");
+    
+    // 完成推理后立即释放任务句柄
+    if (task_handle_) {
+        hbDNNReleaseTask(task_handle_);
+        task_handle_ = nullptr;
+    }
         
     return true;
 }
@@ -843,7 +849,7 @@ void BPU_Detect::Model_Print() const {
     }
 }
 
-bool BPU_Detect::Model_Inference(const cv::Mat& input_img, cv::Mat& output_img, InferenceResult& result){
+bool BPU_Detect::Model_Inference(const cv::Mat& input_img, cv::Mat& output_img, InferenceResult& result, const std::string& image_name){
     if(!is_initialized_) {
         std::cout << "Please initialize first!" << std::endl;
         return false;
@@ -900,12 +906,26 @@ bool BPU_Detect::Model_Inference(const cv::Mat& input_img, cv::Mat& output_img, 
     CalculateMetrics(result);
     
     // 保存结果图像
-    if(!Model_Result_Save(result)) {
+    if(!Model_Result_Save(result, image_name)) {
         return false;
     }
     
     // 更新输出图像
     output_img = output_img_;
+    
+    // 释放输入和输出内存资源
+    if (input_tensor_.sysMem[0].virAddr) {
+        hbSysFreeMem(&input_tensor_.sysMem[0]);
+        input_tensor_.sysMem[0].virAddr = nullptr;
+    }
+    
+    // 释放输出内存
+    for (int i = 0; i < output_count_; i++) {
+        if (output_tensors_[i].sysMem[0].virAddr) {
+            hbSysFreeMem(&output_tensors_[i].sysMem[0]);
+            output_tensors_[i].sysMem[0].virAddr = nullptr;
+        }
+    }
     
     return true;
 }
@@ -1183,7 +1203,7 @@ void BPU_Detect::CalculateMetrics(InferenceResult& result) {
     }
 }
 
-bool BPU_Detect::Model_Result_Save(InferenceResult& result) {
+bool BPU_Detect::Model_Result_Save(InferenceResult& result, const std::string& image_name) {
     return ResultSaver::SaveResults(
         output_path_,
         task_id_,
@@ -1198,7 +1218,8 @@ bool BPU_Detect::Model_Result_Save(InferenceResult& result) {
         y_scale_,
         x_shift_,
         y_shift_,
-        result
+        result,
+        image_name
     );
 }
 
@@ -1254,15 +1275,17 @@ bool BPU_Detect::Model_Release() {
         // 释放输入内存
         if(input_tensor_.sysMem[0].virAddr) {
             hbSysFreeMem(&(input_tensor_.sysMem[0]));
+            input_tensor_.sysMem[0].virAddr = nullptr;
         }
         
         // 释放输出内存
         if (output_tensors_) {
             for(int i = 0; i < output_count_; i++) {
                 if(output_tensors_[i].sysMem[0].virAddr) {
-                hbSysFreeMem(&(output_tensors_[i].sysMem[0]));
+                    hbSysFreeMem(&(output_tensors_[i].sysMem[0]));
+                    output_tensors_[i].sysMem[0].virAddr = nullptr;
+                }
             }
-        }
         
             delete[] output_tensors_;
             output_tensors_ = nullptr;
