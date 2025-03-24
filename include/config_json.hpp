@@ -32,5 +32,6 @@ public:
                           const float y_scale,
                           const int x_shift,
                           const int y_shift,
-                          InferenceResult& result);
+                          InferenceResult& result,
+                          const std::string& image_name);
 };

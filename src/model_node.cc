@@ -9,17 +9,6 @@
 #include <algorithm>  // transform
 #include <unistd.h>   // access
 #include <string.h>   // strrchr
-#include <signal.h>   // 信号处理
-#include <cmath>      // isnan, isinf
-
-// 全局变量，用于信号处理
-volatile sig_atomic_t stop_processing = 0;
-
-// 信号处理函数
-void signal_handler(int sig) {
-    printf("\nReceived signal %d, cleaning up and exiting...\n", sig);
-    stop_processing = 1;
-}
 
 // 判断路径是否为目录
 bool isDirectory(const std::string& path) {
@@ -83,7 +72,7 @@ std::vector<std::string> getImageFiles(const std::string& folder_path) {
                 std::string ext = getFileExtension(name);
                 // 转换为小写
                 std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                if (ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".bmp") {
+                if (ext == ".jpg" || ext == ".jpeg" || ext == ".png") {
                     image_files.push_back(full_path);
                 }
             }
@@ -211,6 +200,16 @@ int main(int argc, char *argv[])
     printf("  label_path: %s\n", config.getLabelPath().c_str());
     printf("  output_path: %s\n", config.getOutputPath().c_str());
 
+    // 初始化检测器
+    BPU_Detect detector(config.getModelName(), config.getTaskType(), config.getModelPath(), config.getClassesNum());
+    
+    // 设置类别名称
+    detector.SetClassNames(config.getClassesLabels());
+    
+    // 设置任务ID和输出路径
+    detector.SetTaskId(config.getTaskId());
+    detector.SetOutputPath(config.getOutputPath());
+
     // 检查输入路径是文件还是文件夹
     std::vector<std::string> image_files;
     std::vector<std::string> label_files;
@@ -228,7 +227,6 @@ int main(int argc, char *argv[])
                     label_files.push_back(label_path);
                 } else {
                     printf("Warning: No label file found for image: %s\n", image_path.c_str());
-                    label_files.push_back(""); // 添加空标签路径占位
                 }
             }
         } else {
@@ -241,94 +239,48 @@ int main(int argc, char *argv[])
         label_files.push_back(config.getLabelPath());
     }
 
-    // 为每张图片创建一个任务ID
-    int success_count = 0;
-    int fail_count = 0;
-
     // 处理每张图片
-    for (size_t i = 0; i < image_files.size() && !stop_processing; i++) {
-        // 每次创建新的检测器实例以避免内存累积
-        BPU_Detect detector(config.getModelName(), config.getTaskType(), config.getModelPath(), config.getClassesNum());
+    for (size_t i = 0; i < image_files.size(); i++) {
+        printf("\nProcessing image %zu/%zu: %s\n", i + 1, image_files.size(), image_files[i].c_str());
         
-        // 设置任务ID（使用原始任务ID加索引，确保唯一性）
-        std::string current_task_id = config.getTaskId() + "_" + std::to_string(i+1);
-        
-        try {
-            printf("\nProcessing image %zu/%zu: %s\n", i + 1, image_files.size(), image_files[i].c_str());
-            
-            // 设置类别名称
-            detector.SetClassNames(config.getClassesLabels());
-            
-            // 设置任务ID和输出路径
-            detector.SetTaskId(current_task_id);
-            detector.SetOutputPath(config.getOutputPath());
-            
-            // 设置当前图片的标签路径
-            if (!label_files[i].empty()) {
-                detector.SetLabelPath(label_files[i]);
-            }
-
-            // 读取输入图像
-            cv::Mat input_image = cv::imread(image_files[i]);
-            if (input_image.empty()) {
-                printf("Failed to read input image: %s\n", image_files[i].c_str());
-                fail_count++;
-                continue;
-            }
-
-            // 执行推理
-            InferenceResult result;
-            cv::Mat output_image;
-            if (!detector.Model_Inference(input_image, output_image, result)) {
-                printf("Model inference failed for image: %s\n", image_files[i].c_str());
-                fail_count++;
-                continue;
-            }
-
-            // 安全打印性能指标
-            printf("Performance metrics for image %zu:\n", i + 1);
-            printf("  FPS: %.2f\n", result.fps);
-            printf("  Preprocess time: %.2f ms\n", result.preprocess_time);
-            printf("  Inference time: %.2f ms\n", result.inference_time);
-            printf("  Postprocess time: %.2f ms\n", result.postprocess_time);
-            printf("  Total time: %.2f ms\n", result.total_time);
-            
-            // 使用安全打印函数打印可能存在问题的浮点数
-            safePrintFloat("  Precision:", result.precision);
-            safePrintFloat("  Recall:", result.recall);
-            safePrintFloat("  mAP@0.5:", result.mAP50);
-            safePrintFloat("  mAP@0.5:0.95:", result.mAP50_95);
-            
-            printf("  Result image saved to: %s\n", result.result_path.c_str());
-            success_count++;
-            
-        } catch (const std::exception& e) {
-            printf("Exception occurred while processing image %s: %s\n", 
-                  image_files[i].c_str(), e.what());
-            fail_count++;
-        } catch (...) {
-            printf("Unknown exception occurred while processing image %s\n", 
-                  image_files[i].c_str());
-            fail_count++;
+        // 设置当前图片的标签路径
+        if (!label_files[i].empty()) {
+            detector.SetLabelPath(label_files[i]);
         }
-        
-        // 释放资源
-        detector.Model_Release();
-        
-        // 每处理10张图片输出一次进度
-        if (i % 10 == 9 || i == image_files.size() - 1) {
-            printf("\nProgress: %zu/%zu (%.1f%%), Success: %d, Failed: %d\n", 
-                  i + 1, image_files.size(), 
-                  (i + 1) * 100.0 / image_files.size(),
-                  success_count, fail_count);
+
+        // 读取输入图像
+        cv::Mat input_image = cv::imread(image_files[i]);
+        if (input_image.empty()) {
+            printf("Failed to read input image: %s\n", image_files[i].c_str());
+            continue;
         }
-        
-        // 短暂等待，让系统有时间释放资源
-        usleep(100000); // 100ms
+
+        // 执行推理
+        InferenceResult result;
+        cv::Mat output_image;
+        // 提取图片文件名作为参数传递给Model_Inference
+        std::string image_file_name = image_files[i];
+        if (!detector.Model_Inference(input_image, output_image, result, image_file_name)) {
+            printf("Model inference failed for image: %s\n", image_files[i].c_str());
+            continue;
+        }
+
+        // 输出性能指标
+        printf("Performance metrics for image %zu:\n", i + 1);
+        printf("  FPS: %.2f\n", result.fps);
+        printf("  Preprocess time: %.2f ms\n", result.preprocess_time);
+        printf("  Inference time: %.2f ms\n", result.inference_time);
+        printf("  Postprocess time: %.2f ms\n", result.postprocess_time);
+        printf("  Total time: %.2f ms\n", result.total_time);
+        printf("  Precision: %.4f\n", result.precision);
+        printf("  Recall: %.4f\n", result.recall);
+        printf("  mAP@0.5: %.4f\n", result.mAP50);
+        printf("  mAP@0.5:0.95: %.4f\n", result.mAP50_95);
+        printf("  Result image saved to: %s\n", result.result_path.c_str());
     }
 
-    printf("\nProcessing complete. Total: %zu, Success: %d, Failed: %d\n", 
-          image_files.size(), success_count, fail_count);
+    // 释放资源
+    detector.Model_Release();
 
     return 0;
 }

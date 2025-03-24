@@ -1,48 +1,595 @@
 {
-    "classifications": [
-        {
-            "class_id": 75,
-            "class_name": "black widow, Latrodectus mactans",
-            "confidence": 1.0,
-            "rank": 1
-        },
-        {
-            "class_id": 664,
-            "class_name": "monitor",
-            "confidence": 0.0,
-            "rank": 2
-        },
-        {
-            "class_id": 671,
-            "class_name": "mountain bike, all-terrain bike, off-roader",
-            "confidence": 0.0,
-            "rank": 3
-        },
-        {
-            "class_id": 670,
-            "class_name": "motor scooter, scooter",
-            "confidence": 0.0,
-            "rank": 4
-        },
-        {
-            "class_id": 669,
-            "class_name": "mosquito net",
-            "confidence": 0.0,
-            "rank": 5
-        }
-    ],
+    "classifications": {
+        "tennis_1_frame_0000_3": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.8062772154808044,
+                "rank": 1
+            },
+            {
+                "class_id": 752,
+                "class_name": "racket, racquet",
+                "confidence": 0.0049710022285580635,
+                "rank": 2
+            },
+            {
+                "class_id": 706,
+                "class_name": "patio, terrace",
+                "confidence": 0.003964220639318228,
+                "rank": 3
+            },
+            {
+                "class_id": 948,
+                "class_name": "Granny Smith",
+                "confidence": 0.0031237381044775248,
+                "rank": 4
+            },
+            {
+                "class_id": 522,
+                "class_name": "croquet ball",
+                "confidence": 0.0019122711382806301,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0000_5": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.6567570567131042,
+                "rank": 1
+            },
+            {
+                "class_id": 937,
+                "class_name": "broccoli",
+                "confidence": 0.031591903418302536,
+                "rank": 2
+            },
+            {
+                "class_id": 489,
+                "class_name": "chainlink fence",
+                "confidence": 0.013893486000597477,
+                "rank": 3
+            },
+            {
+                "class_id": 752,
+                "class_name": "racket, racquet",
+                "confidence": 0.01297754980623722,
+                "rank": 4
+            },
+            {
+                "class_id": 90,
+                "class_name": "lorikeet",
+                "confidence": 0.012491539120674133,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0001": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.8580026030540466,
+                "rank": 1
+            },
+            {
+                "class_id": 988,
+                "class_name": "acorn",
+                "confidence": 0.0670614093542099,
+                "rank": 2
+            },
+            {
+                "class_id": 948,
+                "class_name": "Granny Smith",
+                "confidence": 0.002686253981664777,
+                "rank": 3
+            },
+            {
+                "class_id": 706,
+                "class_name": "patio, terrace",
+                "confidence": 0.0026604582089930773,
+                "rank": 4
+            },
+            {
+                "class_id": 951,
+                "class_name": "lemon",
+                "confidence": 0.002203557873144746,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0002_3": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.31739896535873413,
+                "rank": 1
+            },
+            {
+                "class_id": 556,
+                "class_name": "fire screen, fireguard",
+                "confidence": 0.09319446980953217,
+                "rank": 2
+            },
+            {
+                "class_id": 818,
+                "class_name": "spotlight, spot",
+                "confidence": 0.01634073071181774,
+                "rank": 3
+            },
+            {
+                "class_id": 539,
+                "class_name": "doormat, welcome mat",
+                "confidence": 0.014676770195364952,
+                "rank": 4
+            },
+            {
+                "class_id": 549,
+                "class_name": "envelope",
+                "confidence": 0.013446216471493244,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0002_5": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.9436353445053101,
+                "rank": 1
+            },
+            {
+                "class_id": 988,
+                "class_name": "acorn",
+                "confidence": 0.00785080250352621,
+                "rank": 2
+            },
+            {
+                "class_id": 539,
+                "class_name": "doormat, welcome mat",
+                "confidence": 0.0037100412882864475,
+                "rank": 3
+            },
+            {
+                "class_id": 952,
+                "class_name": "fig",
+                "confidence": 0.0033745989203453064,
+                "rank": 4
+            },
+            {
+                "class_id": 948,
+                "class_name": "Granny Smith",
+                "confidence": 0.0023082196712493896,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0003_1": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.22325216233730316,
+                "rank": 1
+            },
+            {
+                "class_id": 539,
+                "class_name": "doormat, welcome mat",
+                "confidence": 0.07726621627807617,
+                "rank": 2
+            },
+            {
+                "class_id": 556,
+                "class_name": "fire screen, fireguard",
+                "confidence": 0.026900742202997208,
+                "rank": 3
+            },
+            {
+                "class_id": 549,
+                "class_name": "envelope",
+                "confidence": 0.025950610637664795,
+                "rank": 4
+            },
+            {
+                "class_id": 315,
+                "class_name": "mantis, mantid",
+                "confidence": 0.012162556871771812,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0004": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.8771730065345764,
+                "rank": 1
+            },
+            {
+                "class_id": 948,
+                "class_name": "Granny Smith",
+                "confidence": 0.012795769609510899,
+                "rank": 2
+            },
+            {
+                "class_id": 706,
+                "class_name": "patio, terrace",
+                "confidence": 0.009075437672436237,
+                "rank": 3
+            },
+            {
+                "class_id": 988,
+                "class_name": "acorn",
+                "confidence": 0.002141577424481511,
+                "rank": 4
+            },
+            {
+                "class_id": 752,
+                "class_name": "racket, racquet",
+                "confidence": 0.001785398693755269,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0005_2": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.689452588558197,
+                "rank": 1
+            },
+            {
+                "class_id": 611,
+                "class_name": "jigsaw puzzle",
+                "confidence": 0.13530410826206207,
+                "rank": 2
+            },
+            {
+                "class_id": 549,
+                "class_name": "envelope",
+                "confidence": 0.05367802828550339,
+                "rank": 3
+            },
+            {
+                "class_id": 539,
+                "class_name": "doormat, welcome mat",
+                "confidence": 0.021277178078889847,
+                "rank": 4
+            },
+            {
+                "class_id": 893,
+                "class_name": "wallet, billfold, notecase, pocketbook",
+                "confidence": 0.012281510978937149,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0007_4": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.27657002210617065,
+                "rank": 1
+            },
+            {
+                "class_id": 539,
+                "class_name": "doormat, welcome mat",
+                "confidence": 0.18025989830493927,
+                "rank": 2
+            },
+            {
+                "class_id": 549,
+                "class_name": "envelope",
+                "confidence": 0.06652876734733582,
+                "rank": 3
+            },
+            {
+                "class_id": 492,
+                "class_name": "chest",
+                "confidence": 0.06584380567073822,
+                "rank": 4
+            },
+            {
+                "class_id": 611,
+                "class_name": "jigsaw puzzle",
+                "confidence": 0.03605527803301811,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0008_1": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.8097758293151855,
+                "rank": 1
+            },
+            {
+                "class_id": 646,
+                "class_name": "maze, labyrinth",
+                "confidence": 0.0077333003282547,
+                "rank": 2
+            },
+            {
+                "class_id": 752,
+                "class_name": "racket, racquet",
+                "confidence": 0.00338942208327353,
+                "rank": 3
+            },
+            {
+                "class_id": 948,
+                "class_name": "Granny Smith",
+                "confidence": 0.0019095195457339287,
+                "rank": 4
+            },
+            {
+                "class_id": 522,
+                "class_name": "croquet ball",
+                "confidence": 0.0016067021060734987,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0008_2": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.7554919123649597,
+                "rank": 1
+            },
+            {
+                "class_id": 752,
+                "class_name": "racket, racquet",
+                "confidence": 0.007669142913073301,
+                "rank": 2
+            },
+            {
+                "class_id": 522,
+                "class_name": "croquet ball",
+                "confidence": 0.004492578096687794,
+                "rank": 3
+            },
+            {
+                "class_id": 952,
+                "class_name": "fig",
+                "confidence": 0.003391125937923789,
+                "rank": 4
+            },
+            {
+                "class_id": 722,
+                "class_name": "ping-pong ball",
+                "confidence": 0.00250652595423162,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0009": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.9429235458374023,
+                "rank": 1
+            },
+            {
+                "class_id": 522,
+                "class_name": "croquet ball",
+                "confidence": 0.004006847273558378,
+                "rank": 2
+            },
+            {
+                "class_id": 646,
+                "class_name": "maze, labyrinth",
+                "confidence": 0.0025188582949340343,
+                "rank": 3
+            },
+            {
+                "class_id": 722,
+                "class_name": "ping-pong ball",
+                "confidence": 0.0019092661095783114,
+                "rank": 4
+            },
+            {
+                "class_id": 574,
+                "class_name": "golf ball",
+                "confidence": 0.0018301017116755247,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0009_3": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.9136559963226318,
+                "rank": 1
+            },
+            {
+                "class_id": 948,
+                "class_name": "Granny Smith",
+                "confidence": 0.003095107153058052,
+                "rank": 2
+            },
+            {
+                "class_id": 752,
+                "class_name": "racket, racquet",
+                "confidence": 0.0022662444971501827,
+                "rank": 3
+            },
+            {
+                "class_id": 539,
+                "class_name": "doormat, welcome mat",
+                "confidence": 0.0007533018942922354,
+                "rank": 4
+            },
+            {
+                "class_id": 722,
+                "class_name": "ping-pong ball",
+                "confidence": 0.0006073639960959554,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0009_4": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.9016557931900024,
+                "rank": 1
+            },
+            {
+                "class_id": 948,
+                "class_name": "Granny Smith",
+                "confidence": 0.011892762035131454,
+                "rank": 2
+            },
+            {
+                "class_id": 722,
+                "class_name": "ping-pong ball",
+                "confidence": 0.01178038865327835,
+                "rank": 3
+            },
+            {
+                "class_id": 752,
+                "class_name": "racket, racquet",
+                "confidence": 0.004440980032086372,
+                "rank": 4
+            },
+            {
+                "class_id": 417,
+                "class_name": "balloon",
+                "confidence": 0.0036430861800909042,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0010_4": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.71796715259552,
+                "rank": 1
+            },
+            {
+                "class_id": 722,
+                "class_name": "ping-pong ball",
+                "confidence": 0.23109695315361023,
+                "rank": 2
+            },
+            {
+                "class_id": 752,
+                "class_name": "racket, racquet",
+                "confidence": 0.0026716103311628103,
+                "rank": 3
+            },
+            {
+                "class_id": 583,
+                "class_name": "guillotine",
+                "confidence": 0.0023438925854861736,
+                "rank": 4
+            },
+            {
+                "class_id": 736,
+                "class_name": "pool table, billiard table, snooker table",
+                "confidence": 0.0022118801716715097,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0012": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.8459436893463135,
+                "rank": 1
+            },
+            {
+                "class_id": 722,
+                "class_name": "ping-pong ball",
+                "confidence": 0.05547839775681496,
+                "rank": 2
+            },
+            {
+                "class_id": 522,
+                "class_name": "croquet ball",
+                "confidence": 0.01749827153980732,
+                "rank": 3
+            },
+            {
+                "class_id": 706,
+                "class_name": "patio, terrace",
+                "confidence": 0.015720169991254807,
+                "rank": 4
+            },
+            {
+                "class_id": 574,
+                "class_name": "golf ball",
+                "confidence": 0.0044303713366389275,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0014_2": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.8275269865989685,
+                "rank": 1
+            },
+            {
+                "class_id": 646,
+                "class_name": "maze, labyrinth",
+                "confidence": 0.007451063487678766,
+                "rank": 2
+            },
+            {
+                "class_id": 752,
+                "class_name": "racket, racquet",
+                "confidence": 0.00584324449300766,
+                "rank": 3
+            },
+            {
+                "class_id": 522,
+                "class_name": "croquet ball",
+                "confidence": 0.004419942386448383,
+                "rank": 4
+            },
+            {
+                "class_id": 952,
+                "class_name": "fig",
+                "confidence": 0.0030869916081428528,
+                "rank": 5
+            }
+        ],
+        "tennis_1_frame_0014_5": [
+            {
+                "class_id": 852,
+                "class_name": "tennis ball",
+                "confidence": 0.8728058934211731,
+                "rank": 1
+            },
+            {
+                "class_id": 752,
+                "class_name": "racket, racquet",
+                "confidence": 0.023871546611189842,
+                "rank": 2
+            },
+            {
+                "class_id": 664,
+                "class_name": "monitor",
+                "confidence": 0.005307797342538834,
+                "rank": 3
+            },
+            {
+                "class_id": 722,
+                "class_name": "ping-pong ball",
+                "confidence": 0.005200275685638189,
+                "rank": 4
+            },
+            {
+                "class_id": 782,
+                "class_name": "screen, CRT screen",
+                "confidence": 0.0032285102643072605,
+                "rank": 5
+            }
+        ]
+    },
     "metrics": {
         "accuracy_top1": 0.0,
         "accuracy_top5": 0.0
     },
     "model_name": "MobileNetv4-deploy_224x224_nv12",
     "performance": {
-        "fps": 250.0,
-        "inference_time": 0.0,
+        "fps": 175.92591857910156,
+        "inference_time": 2.0,
         "postprocess_time": 0.0,
-        "preprocess_time": 4.0,
-        "total_time": 4.0
+        "preprocess_time": 3.722221851348877,
+        "total_time": 5.722222805023193
     },
+    "processed_images": 18,
     "task_id": "1",
     "task_type": "classification"
 }

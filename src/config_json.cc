@@ -77,9 +77,21 @@ bool ResultSaver::SaveResults(const std::string& output_path,
                             const float y_scale,
                             const int x_shift,
                             const int y_shift,
-                            InferenceResult& result) {
+                            InferenceResult& result,
+                            const std::string& image_name) {
+    // 提取图片文件名作为JSON中的键（不包含路径和扩展名）
+    std::string image_key = image_name;
+    size_t last_slash = image_key.find_last_of("/\\");
+    if (last_slash != std::string::npos) {
+        image_key = image_key.substr(last_slash + 1);
+    }
+    size_t last_dot = image_key.find_last_of(".");
+    if (last_dot != std::string::npos) {
+        image_key = image_key.substr(0, last_dot);
+    }
+    
     // 生成结果图像路径
-    std::string image_path = output_path + "result_" + task_id + ".jpg";
+    std::string image_path = output_path + "result_" + image_key + ".jpg";
     
     // 保存结果图像
     if (!cv::imwrite(image_path, output_img)) {
@@ -90,11 +102,69 @@ bool ResultSaver::SaveResults(const std::string& output_path,
     result.result_path = image_path;
     std::cout << "Result image saved to: " << image_path << std::endl;
     
-    // 生成JSON结果文件，按照指定的顺序创建
-    nlohmann::json result_json;
-    nlohmann::json ordered_json;
+    // 准备JSON结果文件路径
+    std::string json_path = output_path + "result_" + task_id + ".json";
     
-    // 添加检测结果 - 按照需要的顺序构建
+    // 读取现有的JSON文件（如果存在）
+    nlohmann::json result_json;
+    bool json_exists = false;
+    std::ifstream json_file_in(json_path);
+    if (json_file_in.is_open()) {
+        try {
+            json_file_in >> result_json;
+            json_exists = true;
+        } catch (const std::exception& e) {
+            std::cerr << "Warning: Failed to parse existing JSON file: " << e.what() << std::endl;
+            // 重新创建一个新的JSON对象
+            result_json = nlohmann::json();
+        }
+        json_file_in.close();
+    }
+    
+    // 如果是新文件，添加基本信息
+    if (!json_exists) {
+        result_json["task_id"] = task_id;
+        result_json["task_type"] = task_type;
+        result_json["model_name"] = model_name;
+        result_json["performance"] = {
+            {"fps", result.fps},
+            {"preprocess_time", result.preprocess_time},
+            {"inference_time", result.inference_time},
+            {"postprocess_time", result.postprocess_time},
+            {"total_time", result.total_time}
+        };
+        
+        // 根据任务类型设置不同的指标
+        if (task_type == "detection") {
+            result_json["metrics"] = {
+                {"mAP50", result.mAP50},
+                {"mAP50-95", result.mAP50_95},
+                {"precision", result.precision},
+                {"recall", result.recall}
+            };
+        } else if (task_type == "classification") {
+            result_json["metrics"] = {
+                {"accuracy_top1", result.acc1},
+                {"accuracy_top5", result.acc5}
+            };
+        }
+    } else {
+        // 更新性能指标（使用平均值）
+        auto& perf = result_json["performance"];
+        int img_count = result_json.contains("processed_images") ? result_json["processed_images"].get<int>() : 0;
+        float weight = 1.0f / (img_count + 1);
+        
+        perf["fps"] = perf["fps"].get<float>() * (1.0f - weight) + result.fps * weight;
+        perf["preprocess_time"] = perf["preprocess_time"].get<float>() * (1.0f - weight) + result.preprocess_time * weight;
+        perf["inference_time"] = perf["inference_time"].get<float>() * (1.0f - weight) + result.inference_time * weight;
+        perf["postprocess_time"] = perf["postprocess_time"].get<float>() * (1.0f - weight) + result.postprocess_time * weight;
+        perf["total_time"] = perf["total_time"].get<float>() * (1.0f - weight) + result.total_time * weight;
+        
+        // 更新处理图片数量
+        result_json["processed_images"] = img_count + 1;
+    }
+    
+    // 添加检测结果
     if (task_type == "detection") {
         nlohmann::json detections = nlohmann::json::array();
         for (size_t cls_id = 0; cls_id < bboxes.size(); cls_id++) {
@@ -124,7 +194,7 @@ bool ResultSaver::SaveResults(const std::string& output_path,
                 detections.push_back(detection);
             }
         }
-        result_json["detections"] = detections;
+        result_json["detections"][image_key] = detections;
     } else if (task_type == "classification") {
         // 添加分类结果
         nlohmann::json classifications = nlohmann::json::array();
@@ -145,44 +215,14 @@ bool ResultSaver::SaveResults(const std::string& output_path,
             classifications.push_back(classification);
         }
         
-        result_json["classifications"] = classifications;
-    }
-    
-    // 按照指定的顺序添加字段
-    ordered_json["task_id"] = task_id;
-    ordered_json["task_type"] = task_type;
-    ordered_json["model_name"] = model_name;
-    ordered_json["performance"] = {
-        {"fps", result.fps},
-        {"preprocess_time", result.preprocess_time},
-        {"inference_time", result.inference_time},
-        {"postprocess_time", result.postprocess_time},
-        {"total_time", result.total_time}
-    };
-    
-    // 根据任务类型设置不同的指标
-    if (task_type == "detection") {
-        ordered_json["metrics"] = {
-            {"mAP50", result.mAP50},
-            {"mAP50-95", result.mAP50_95},
-            {"precision", result.precision},
-            {"recall", result.recall}
-        };
-        ordered_json["detections"] = result_json["detections"];
-    } else if (task_type == "classification") {
-        ordered_json["metrics"] = {
-            {"accuracy_top1", result.acc1},
-            {"accuracy_top5", result.acc5}
-        };
-        ordered_json["classifications"] = result_json["classifications"];
+        result_json["classifications"][image_key] = classifications;
     }
     
     // 保存JSON结果
-    std::string json_path = output_path + "result_" + task_id + ".json";
-    std::ofstream json_file(json_path);
-    if (json_file.is_open()) {
-        json_file << std::setw(4) << ordered_json << std::endl;
-        json_file.close();
+    std::ofstream json_file_out(json_path);
+    if (json_file_out.is_open()) {
+        json_file_out << std::setw(4) << result_json << std::endl;
+        json_file_out.close();
         std::cout << "Result JSON saved to: " << json_path << std::endl;
     } else {
         std::cerr << "Failed to save JSON results: " << json_path << std::endl;
