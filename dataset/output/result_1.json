@@ -37,11 +37,11 @@
     },
     "model_name": "MobileNetv4-deploy_224x224_nv12",
     "performance": {
-        "fps": 34.482757568359375,
-        "inference_time": 4.0,
+        "fps": 142.85714721679688,
+        "inference_time": 2.0,
         "postprocess_time": 0.0,
-        "preprocess_time": 25.0,
-        "total_time": 29.0
+        "preprocess_time": 5.0,
+        "total_time": 7.0
     },
     "task_id": "1",
     "task_type": "classification"

@@ -45,14 +45,6 @@
 // YOLOv11特有常量
 #define REG 16  // 离散化程度的超参数，YOLO11中使用
 
-// 特征图尺寸宏定义
-#define H_8 80    // 特征图高度 - 小目标
-#define W_8 80    // 特征图宽度 - 小目标 
-#define H_16 40   // 特征图高度 - 中目标
-#define W_16 40   // 特征图宽度 - 中目标
-#define H_32 20   // 特征图高度 - 大目标
-#define W_32 20   // 特征图宽度 - 大目标
-
 // 模型类型枚举
 enum ModelType {
     YOLOV5 = 0,   // YOLOv5系列模型
@@ -137,6 +129,19 @@ class BPU_Detect{
         bool LoadGroundTruthData();
         float CalculateIoU(const BBoxInfo& box1, const BBoxInfo& box2);
         ModelType DetermineModelType(const std::string& model_name);
+
+        void CalculateFeatureMapSizes(int input_height, int input_width);
+
+        // 特征图尺寸变量
+        int H_8_;    // 特征图高度 - 小目标
+        int W_8_;    // 特征图宽度 - 小目标 
+        int H_16_;   // 特征图高度 - 中目标
+        int W_16_;   // 特征图宽度 - 中目标
+        int H_32_;   // 特征图高度 - 大目标
+        int W_32_;   // 特征图宽度 - 大目标
+
+        // 计算特征图尺寸的函数
+
 
         std::string model_name_;      // 模型名称
         std::string task_type_;       // 任务类型

@@ -104,38 +104,54 @@ bool BPU_Detect::Model_Load()
 
 }
 
+// 计算特征图尺寸的函数实现
+void BPU_Detect::CalculateFeatureMapSizes(int input_height, int input_width) {
+    // 计算不同尺度的特征图尺寸
+    H_8_ = input_height / 8;
+    W_8_ = input_width / 8;
+    H_16_ = input_height / 16;
+    W_16_ = input_width / 16;
+    H_32_ = input_height / 32;
+    W_32_ = input_width / 32;
+    
+    std::cout << "Calculated feature map sizes:" << std::endl;
+    std::cout << "Small (1/8):  " << H_8_ << "x" << W_8_ << std::endl;
+    std::cout << "Medium (1/16): " << H_16_ << "x" << W_16_ << std::endl;
+    std::cout << "Large (1/32):  " << H_32_ << "x" << W_32_ << std::endl;
+}
+
 bool BPU_Detect::Model_Output_Order()
 {
     if (model_type_ == YOLOV5 && task_type_ == "detection") {
-    // 初始化默认顺序
-    output_order_[0] = 0;  // 默认第1个输出
-    output_order_[1] = 1;  // 默认第2个输出
-    output_order_[2] = 2;  // 默认第3个输出
-    // 定义期望的输出特征图尺寸和通道数
-    int32_t expected_shapes[3][3] = {
-        {H_8,  W_8,  3 * (5 + classes_num_)},   // 小目标特征图: H/8 x W/8
-        {H_16, W_16, 3 * (5 + classes_num_)},   // 中目标特征图: H/16 x W/16
-        {H_32, W_32, 3 * (5 + classes_num_)}    // 大目标特征图: H/32 x W/32
-    };
-    for(int i = 0; i < 3; i++) {
-        for(int j = 0; j < 3; j++) {
-                hbDNNTensorProperties output_properties;
-            RDK_CHECK_SUCCESS(
-                hbDNNGetOutputTensorProperties(&output_properties, dnn_handle_, j),
-                "Get output tensor properties failed");
+        // 初始化默认顺序
+        output_order_[0] = 0;  // 默认第1个输出
+        output_order_[1] = 1;  // 默认第2个输出
+        output_order_[2] = 2;  // 默认第3个输出
+        // 定义期望的输出特征图尺寸和通道数
+        int32_t expected_shapes[3][3] = {
+            {H_8_,  W_8_,  3 * (5 + classes_num_)},   // 小目标特征图: H/8 x W/8
+            {H_16_, W_16_, 3 * (5 + classes_num_)},   // 中目标特征图: H/16 x W/16
+            {H_32_, W_32_, 3 * (5 + classes_num_)}    // 大目标特征图: H/32 x W/32
+        };
+        for(int i = 0; i < 3; i++) {
+            for(int j = 0; j < 3; j++) {
+                    hbDNNTensorProperties output_properties;
+                RDK_CHECK_SUCCESS(
+                    hbDNNGetOutputTensorProperties(&output_properties, dnn_handle_, j),
+                    "Get output tensor properties failed");
 
-            int32_t actual_h = output_properties.validShape.dimensionSize[1];
-            int32_t actual_w = output_properties.validShape.dimensionSize[2];
-            int32_t actual_c = output_properties.validShape.dimensionSize[3];
+                int32_t actual_h = output_properties.validShape.dimensionSize[1];
+                int32_t actual_w = output_properties.validShape.dimensionSize[2];
+                int32_t actual_c = output_properties.validShape.dimensionSize[3];
 
-            if(actual_h == expected_shapes[i][0] && 
-            actual_w == expected_shapes[i][1] && 
-            actual_c == expected_shapes[i][2]) {
-                    output_order_[i] = j;
-                break;
+                if(actual_h == expected_shapes[i][0] && 
+                actual_w == expected_shapes[i][1] && 
+                actual_c == expected_shapes[i][2]) {
+                        output_order_[i] = j;
+                    break;
+                    }
                 }
             }
-        }
 
             std::cout << "\n============ Output Order Mapping for YOLOv5 ============" << std::endl;
         std::cout << "Small object  (1/" << 8  << "): output[" << output_order_[0] << "]" << std::endl;
@@ -151,12 +167,12 @@ bool BPU_Detect::Model_Output_Order()
         
         // 定义YOLO11期望的输出特征图属性
         int32_t order_we_want[6][3] = {
-            {H_8, W_8, classes_num_},    // output[order[0]]: (1, H/8, W/8, CLASSES_NUM)
-            {H_8, W_8, 4 * REG},         // output[order[1]]: (1, H/8, W/8, 4*REG)
-            {H_16, W_16, classes_num_},  // output[order[2]]: (1, H/16, W/16, CLASSES_NUM)
-            {H_16, W_16, 4 * REG},       // output[order[3]]: (1, H/16, W/16, 4*REG)
-            {H_32, W_32, classes_num_},  // output[order[4]]: (1, H/32, W/32, CLASSES_NUM)
-            {H_32, W_32, 4 * REG}        // output[order[5]]: (1, H/32, W/32, 4*REG)
+            {H_8_, W_8_, classes_num_},    // output[order[0]]: (1, H/8, W/8, CLASSES_NUM)
+            {H_8_, W_8_, 4 * REG},         // output[order[1]]: (1, H/8, W/8, 4*REG)
+            {H_16_, W_16_, classes_num_},  // output[order[2]]: (1, H/16, W/16, CLASSES_NUM)
+            {H_16_, W_16_, 4 * REG},       // output[order[3]]: (1, H/16, W/16, 4*REG)
+            {H_32_, W_32_, classes_num_},  // output[order[4]]: (1, H/32, W/32, CLASSES_NUM)
+            {H_32_, W_32_, 4 * REG}        // output[order[5]]: (1, H/32, W/32, 4*REG)
         };
         
         // 遍历每个期望的输出
@@ -206,12 +222,12 @@ bool BPU_Detect::Model_Output_Order()
         
         // 定义YOLOv8期望的输出特征图属性，参考main.cc中的结构
         int32_t order_we_want[6][3] = {
-            {H_8, W_8, 64},             // output[order[0]]: (1, H/8, W/8, 64)
-            {H_16, W_16, 64},           // output[order[1]]: (1, H/16, W/16, 64)
-            {H_32, W_32, 64},           // output[order[2]]: (1, H/32, W/32, 64)
-            {H_8, W_8, classes_num_},   // output[order[3]]: (1, H/8, W/8, classes_num_)
-            {H_16, W_16, classes_num_}, // output[order[4]]: (1, H/16, W/16, classes_num_)
-            {H_32, W_32, classes_num_}, // output[order[5]]: (1, H/32, W/32, classes_num_)
+            {H_8_, W_8_, 64},             // output[order[0]]: (1, H/8, W/8, 64)
+            {H_16_, W_16_, 64},           // output[order[1]]: (1, H/16, W/16, 64)
+            {H_32_, W_32_, 64},           // output[order[2]]: (1, H/32, W/32, 64)
+            {H_8_, W_8_, classes_num_},   // output[order[3]]: (1, H/8, W/8, classes_num_)
+            {H_16_, W_16_, classes_num_}, // output[order[4]]: (1, H/16, W/16, classes_num_)
+            {H_32_, W_32_, classes_num_}  // output[order[5]]: (1, H/32, W/32, classes_num_)
         };
         
         // 遍历每个期望的输出
@@ -318,24 +334,28 @@ bool BPU_Detect::Model_Info_check()
         std::cout << ", " << input_properties_.validShape.dimensionSize[1];
         std::cout << ", " << input_h_;
         std::cout << ", " << input_w_ << ")" << std::endl;
-        if (task_type_ == "detection"){
-            if(input_h_ == 640 && input_w_ == 640){
-                std::cout << "Input size is 640x640, meet the detection task requirements" << std::endl;
-            }
-            else{
-                std::cout << "Input size does not meet the detection task requirements, please check!" << std::endl;
-                return false;
-            }
-        }
-        else if(task_type_ == "classification"){
-            if(input_h_ == 224 && input_w_ == 224){
-                std::cout << "Input size is 224x224, meet the classification task requirements" << std::endl;
-            }
-            else{
-                std::cout << "Input size does not meet the classification task requirements, please check!" << std::endl;
-                return false;
-            }
-        }
+        
+        // 计算特征图尺寸
+        CalculateFeatureMapSizes(input_h_, input_w_);
+        
+        // if (task_type_ == "detection"){
+        //     if(input_h_ == 640 && input_w_ == 640){
+        //         std::cout << "Input size is 640x640, meet the detection task requirements" << std::endl;
+        //     }
+        //     else{
+        //         std::cout << "Input size does not meet the detection task requirements, please check!" << std::endl;
+        //         return false;
+        //     }
+        // }
+        // else if(task_type_ == "classification"){
+        //     if(input_h_ == 224 && input_w_ == 224){
+        //         std::cout << "Input size is 224x224, meet the classification task requirements" << std::endl;
+        //     }
+        //     else{
+        //         std::cout << "Input size does not meet the classification task requirements, please check!" << std::endl;
+        //         return false;
+        //     }
+        // }
     }
     else{
         std::cout << "Input size does not meet the requirements, please check!" << std::endl;
@@ -525,9 +545,9 @@ bool BPU_Detect::Model_Detection_Postprocess()
 
     float conf_thres_raw = -log(1 / score_threshold_ - 1);
 
-    Model_Process_FeatureMap(output_tensors_[output_order_[0]], H_8, W_8, s_anchors_, conf_thres_raw);
-    Model_Process_FeatureMap(output_tensors_[output_order_[1]], H_16, W_16, m_anchors_, conf_thres_raw);
-    Model_Process_FeatureMap(output_tensors_[output_order_[2]], H_32, W_32, l_anchors_, conf_thres_raw);
+    Model_Process_FeatureMap(output_tensors_[output_order_[0]], H_8_, W_8_, s_anchors_, conf_thres_raw);
+    Model_Process_FeatureMap(output_tensors_[output_order_[1]], H_16_, W_16_, m_anchors_, conf_thres_raw);
+    Model_Process_FeatureMap(output_tensors_[output_order_[2]], H_32_, W_32_, l_anchors_, conf_thres_raw);
 
     for(int i = 0; i < classes_num_; i++) {
         if(!bboxes_[i].empty()) {
@@ -1289,9 +1309,9 @@ void BPU_Detect::Model_Process_FeatureMap_YOLO11(hbDNNTensor& cls_tensor,
     
     // 计算stride
     float stride = 0;
-    if (feature_h == H_8) stride = 8.0;
-    else if (feature_h == H_16) stride = 16.0;
-    else if (feature_h == H_32) stride = 32.0;
+    if (feature_h == H_8_) stride = 8.0;
+    else if (feature_h == H_16_) stride = 16.0;
+    else if (feature_h == H_32_) stride = 32.0;
     
     // 遍历特征图
     for (int h = 0; h < feature_h; h++) {
@@ -1361,21 +1381,21 @@ bool BPU_Detect::Model_Detection_Postprocess_YOLO11() {
     
     // 处理小目标特征图
     Model_Process_FeatureMap_YOLO11(
-        output_tensors_[output_order_[0]], // 类别输出
-        output_tensors_[output_order_[1]], // 边界框输出
-        H_8, W_8);
-        
+        output_tensors_[output_order_[0]],  // cls tensor
+        output_tensors_[output_order_[1]],  // reg tensor
+        H_8_, W_8_);
+    
     // 处理中目标特征图
     Model_Process_FeatureMap_YOLO11(
-        output_tensors_[output_order_[2]], // 类别输出
-        output_tensors_[output_order_[3]], // 边界框输出
-        H_16, W_16);
-        
+        output_tensors_[output_order_[2]],  // cls tensor
+        output_tensors_[output_order_[3]],  // reg tensor
+        H_16_, W_16_);
+    
     // 处理大目标特征图
     Model_Process_FeatureMap_YOLO11(
-        output_tensors_[output_order_[4]], // 类别输出
-        output_tensors_[output_order_[5]], // 边界框输出
-        H_32, W_32);
+        output_tensors_[output_order_[4]],  // cls tensor
+        output_tensors_[output_order_[5]],  // reg tensor
+        H_32_, W_32_);
     
     // 对每个类别执行NMS
     for (int i = 0; i < classes_num_; i++) {
@@ -1515,19 +1535,19 @@ bool BPU_Detect::Model_Detection_Postprocess_YOLOV8() {
     // 处理小目标特征图
     Model_Process_FeatureMap_YOLOV8(
         output_tensors_[output_order_[0]], // 实际上不会使用这个参数
-        H_8, W_8,
+        H_8_, W_8_,
         8.0f);
     
     // 处理中目标特征图
     Model_Process_FeatureMap_YOLOV8(
         output_tensors_[output_order_[1]], // 实际上不会使用这个参数
-        H_16, W_16,
+        H_16_, W_16_,
         16.0f);
     
     // 处理大目标特征图
     Model_Process_FeatureMap_YOLOV8(
         output_tensors_[output_order_[2]], // 实际上不会使用这个参数
-        H_32, W_32,
+        H_32_, W_32_,
         32.0f);
     
     // 对每个类别执行NMS
