@@ -1007,6 +1007,6 @@
         "toilet tissue, toilet paper, bathroom tissue"
     ],
     "image_path": "/root/Working/d-modelsquare-test/dataset/input/images/",
-    "label_path": "/root/Working/d-modelsquare-test/dataset/input/labels/",
+    "label_path": "",
     "output_path": "/root/Working/d-modelsquare-test/dataset/output"
 }

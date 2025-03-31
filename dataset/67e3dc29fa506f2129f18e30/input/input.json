@@ -1,0 +1,13 @@
+{
+    "task_id": "67e3dc29fa506f2129f18e30",
+    "task_type": "detection",
+    "model_name": "yolov8n",
+    "model_path": "/root/Working/d-modelsquare-test/dataset/67e3dc29fa506f2129f18e30/input/models/train-99f4cf94aac04cb18b424826f97d899ayolov8n_bayes-e_nv12.bin",
+    "classes_num": 1,
+    "classes_labels": [
+        "cat"
+    ],
+    "image_path": "/root/Working/d-modelsquare-test/dataset/67e3dc29fa506f2129f18e30/input/images",
+    "label_path": "/root/Working/d-modelsquare-test/dataset/67e3dc29fa506f2129f18e30/input/labels",
+    "output_path": "/root/Working/d-modelsquare-test/dataset/67e3dc29fa506f2129f18e30/output"
+}

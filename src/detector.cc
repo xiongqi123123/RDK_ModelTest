@@ -821,9 +821,9 @@ void BPU_Detect::Model_Print() const {
             
             for (size_t i = 0; i < indices_[0].size(); i++) {
                 int idx = indices_[0][i];
-                float probability = scores_[0][idx];
+                float probability = scores_[0][i]; // 修改：使用正确的索引获取置信度
                 
-                // 计算类别ID (这里使用idx作为类别ID因为我们在后处理中对结果进行了排序)
+                // 计算类别ID
                 std::string class_name = (idx < static_cast<int>(class_names_.size())) ? 
                                        class_names_[idx] : "class" + std::to_string(idx);
                 
@@ -1004,6 +1004,11 @@ void BPU_Detect::CalculateMetrics(InferenceResult& result) {
                 
                 result.acc1 = in_top1 ? 1.0f : 0.0f;
                 result.acc5 = in_top5 ? 1.0f : 0.0f;
+                
+                // 确保acc5至少等于acc1（因为top-5包含top-1）
+                if (result.acc1 > result.acc5) {
+                    result.acc5 = result.acc1;
+                }
             }
             
             std::cout << "Calculate true accuracy - Top-1: " << (in_top1 ? "correct" : "incorrect") 
@@ -1024,7 +1029,9 @@ void BPU_Detect::CalculateMetrics(InferenceResult& result) {
                 
                 result.acc5 = (count > 0) ? (sum_top5 / count) : 0.0f;
             }
-            
+            if (result.acc1 > result.acc5) {
+                    result.acc5 = result.acc1;
+                }
             std::cout << "Simulate accuracy using confidence - Top-1: " << (result.acc1 * 100.0f) << "%"
                      << ", Top-5: " << (result.acc5 * 100.0f) << "%" << std::endl;
         }

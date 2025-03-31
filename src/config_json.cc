@@ -132,8 +132,8 @@ bool ResultSaver::SaveResults(const std::string& output_path,
             };
         } else if (task_type == "classification") {
             result_json["metrics"] = {
-                {"accuracy_top1", result.acc1},
-                {"accuracy_top5", result.acc5}
+                {"top1_accuracy", result.acc1},
+                {"top5_accuracy", result.acc5}
             };
         }
     } else {
@@ -147,6 +147,22 @@ bool ResultSaver::SaveResults(const std::string& output_path,
         perf["inference_time"] = perf["inference_time"].get<float>() * (1.0f - weight) + result.inference_time * weight;
         perf["postprocess_time"] = perf["postprocess_time"].get<float>() * (1.0f - weight) + result.postprocess_time * weight;
         perf["total_time"] = perf["total_time"].get<float>() * (1.0f - weight) + result.total_time * weight;
+        
+        // 更新metrics部分
+        if (task_type == "detection") {
+            // 更新检测相关的metrics（如果result中有值且大于0，则使用result的值）
+            auto& metrics = result_json["metrics"];
+            if (result.mAP50 > 0) metrics["mAP50"] = result.mAP50;
+            if (result.mAP50_95 > 0) metrics["mAP50-95"] = result.mAP50_95;
+            if (result.precision > 0) metrics["precision"] = result.precision;
+            if (result.recall > 0) metrics["recall"] = result.recall;
+        } else if (task_type == "classification") {
+            // 更新分类相关的metrics
+            auto& metrics = result_json["metrics"];
+            if (result.acc1 > 0) metrics["top1_accuracy"] = result.acc1;
+            if (result.acc5 > 0) metrics["top5_accuracy"] = result.acc5;
+        }
+        
         result_json["processed_images"] = img_count + 1;
     }
     
