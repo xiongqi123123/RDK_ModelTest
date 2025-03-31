@@ -44,3 +44,4 @@
 build/
 dataset/output/
 *.JPEG
+dataset/input/calibration_images/
