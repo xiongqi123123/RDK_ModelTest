@@ -141,8 +141,9 @@ bool ResultSaver::SaveResults(const std::string& output_path,
     } else {
         // 更新性能指标（使用平均值）
         auto& perf = result_json["performance"];
-        int img_count = result_json.contains("processed_images") ? result_json["processed_images"].get<int>() : 0;
-        float weight = 1.0f / (img_count + 1);
+        int processed_count = result_json.contains("processed_images") ? 
+                             result_json["processed_images"].get<int>() : 0;
+        float weight = 1.0f / (processed_count + 1);
         
         perf["fps"] = perf["fps"].get<float>() * (1.0f - weight) + result.fps * weight;
         perf["preprocess_time"] = perf["preprocess_time"].get<float>() * (1.0f - weight) + result.preprocess_time * weight;
@@ -163,19 +164,16 @@ bool ResultSaver::SaveResults(const std::string& output_path,
                              result_json["processed_images"].get<int>() : 0;
             total_images++;
             
-            auto& accum = result_json["accumulated_metrics"];
-            float sum_mAP50 = accum["sum_mAP50"].get<float>() + result.mAP50;
-            float sum_mAP50_95 = accum["sum_mAP50_95"].get<float>() + result.mAP50_95;
-            float sum_precision = accum["sum_precision"].get<float>() + result.precision;
-            float sum_recall = accum["sum_recall"].get<float>() + result.recall;
+            float sum_mAP50 = result_json["metrics"]["mAP50"].get<float>() + result.mAP50;
+            float sum_mAP50_95 = result_json["metrics"]["mAP50-95"].get<float>() + result.mAP50_95;
+            float sum_precision = result_json["metrics"]["precision"].get<float>() + result.precision;
+            float sum_recall = result_json["metrics"]["recall"].get<float>() + result.recall;
             
             // 更新累积和
-            accum["sum_mAP50"] = sum_mAP50;
-            accum["sum_mAP50_95"] = sum_mAP50_95;
-            accum["sum_precision"] = sum_precision;
-            accum["sum_recall"] = sum_recall;
-            
-            // 对于检测任务，使用processed_images作为唯一的计数器
+            result_json["metrics"]["mAP50"] = sum_mAP50;
+            result_json["metrics"]["mAP50-95"] = sum_mAP50_95;
+            result_json["metrics"]["precision"] = sum_precision;
+            result_json["metrics"]["recall"] = sum_recall;
             int processed_count = result_json.contains("processed_images") ? 
                                  result_json["processed_images"].get<int>() : 0;
             processed_count++;
@@ -186,23 +184,26 @@ bool ResultSaver::SaveResults(const std::string& output_path,
             result_json["metrics"]["precision"] = sum_precision / processed_count;
             result_json["metrics"]["recall"] = sum_recall / processed_count;
             
-            // 更新计数
             result_json["processed_images"] = processed_count;
         } else if (task_type == "classification") {
-            int img_count = result_json.contains("processed_images") ? result_json["processed_images"].get<int>() : 0;
+
+            int processed_count = result_json.contains("processed_images") ? 
+                        result_json["processed_images"].get<int>() : 0;
+            processed_count++;
+            
             auto& metrics = result_json["metrics"];
             float current_acc = result.acc1 > 0.5f ? 1.0f : 0.0f;
             float prev_acc = metrics["top1_accuracy"].get<float>();
             // (旧平均值 * 旧样本数 + 新值) / 新样本数
-            float new_acc = (prev_acc * img_count + current_acc) / (img_count + 1);
+            float new_acc = (prev_acc * processed_count + current_acc) / (processed_count + 1);
             metrics["top1_accuracy"] = new_acc;
             float current_acc5 = result.acc5 > 0.5f ? 1.0f : 0.0f;
             float prev_acc5 = metrics["top5_accuracy"].get<float>();
-            float new_acc5 = (prev_acc5 * img_count + current_acc5) / (img_count + 1);
+            float new_acc5 = (prev_acc5 * processed_count + current_acc5) / (processed_count + 1);
             metrics["top5_accuracy"] = new_acc5;
+
+            result_json["processed_images"] = processed_count;
         }
-        
-        result_json["processed_images"] = img_count + 1;
     }
     
     if (task_type == "detection") {
