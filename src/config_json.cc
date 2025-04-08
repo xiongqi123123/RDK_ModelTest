@@ -159,23 +159,20 @@ bool ResultSaver::SaveResults(const std::string& output_path,
             // if (result.mAP50_95 > 0) metrics["mAP50-95"] = result.mAP50_95;
             // if (result.precision > 0) metrics["precision"] = result.precision;
             // if (result.recall > 0) metrics["recall"] = result.recall;
-            // 更新累积指标
-            int total_images = result_json.contains("processed_images") ? 
-                             result_json["processed_images"].get<int>() : 0;
-            total_images++;
-            
-            float sum_mAP50 = result_json["metrics"]["mAP50"].get<float>() + result.mAP50;
-            float sum_mAP50_95 = result_json["metrics"]["mAP50-95"].get<float>() + result.mAP50_95;
-            float sum_precision = result_json["metrics"]["precision"].get<float>() + result.precision;
-            float sum_recall = result_json["metrics"]["recall"].get<float>() + result.recall;
-            
-            // 更新累积和
-            result_json["metrics"]["mAP50"] = sum_mAP50;
-            result_json["metrics"]["mAP50-95"] = sum_mAP50_95;
-            result_json["metrics"]["precision"] = sum_precision;
-            result_json["metrics"]["recall"] = sum_recall;
             int processed_count = result_json.contains("processed_images") ? 
                                  result_json["processed_images"].get<int>() : 0;
+            
+            float current_mAP50 = result_json["metrics"]["mAP50"].get<float>();
+            float current_mAP50_95 = result_json["metrics"]["mAP50-95"].get<float>();
+            float current_precision = result_json["metrics"]["precision"].get<float>();
+            float current_recall = result_json["metrics"]["recall"].get<float>();
+            
+            // 计算旧的累积和（当前平均值 * 旧的图像数量）
+            float sum_mAP50 = current_mAP50 * processed_count + result.mAP50;
+            float sum_mAP50_95 = current_mAP50_95 * processed_count + result.mAP50_95;
+            float sum_precision = current_precision * processed_count + result.precision;
+            float sum_recall = current_recall * processed_count + result.recall;
+            
             processed_count++;
             
             // 计算新的平均指标
