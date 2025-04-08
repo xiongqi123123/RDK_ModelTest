@@ -130,11 +130,13 @@ bool ResultSaver::SaveResults(const std::string& output_path,
                 {"precision", result.precision},
                 {"recall", result.recall}
             };
+            result_json["processed_images"] = 1;
         } else if (task_type == "classification") {
             result_json["metrics"] = {
                 {"top1_accuracy", result.acc1},
                 {"top5_accuracy", result.acc5}
             };
+            result_json["processed_images"] = 1;
         }
     } else {
         // 更新性能指标（使用平均值）
@@ -150,17 +152,54 @@ bool ResultSaver::SaveResults(const std::string& output_path,
         
         // 更新metrics部分
         if (task_type == "detection") {
-            // 更新检测相关的metrics（如果result中有值且大于0，则使用result的值）
-            auto& metrics = result_json["metrics"];
-            if (result.mAP50 > 0) metrics["mAP50"] = result.mAP50;
-            if (result.mAP50_95 > 0) metrics["mAP50-95"] = result.mAP50_95;
-            if (result.precision > 0) metrics["precision"] = result.precision;
-            if (result.recall > 0) metrics["recall"] = result.recall;
+            // // 更新检测相关的metrics（如果result中有值且大于0，则使用result的值）
+            // auto& metrics = result_json["metrics"];
+            // if (result.mAP50 > 0) metrics["mAP50"] = result.mAP50;
+            // if (result.mAP50_95 > 0) metrics["mAP50-95"] = result.mAP50_95;
+            // if (result.precision > 0) metrics["precision"] = result.precision;
+            // if (result.recall > 0) metrics["recall"] = result.recall;
+            // 更新累积指标
+            int total_images = result_json.contains("processed_images") ? 
+                             result_json["processed_images"].get<int>() : 0;
+            total_images++;
+            
+            auto& accum = result_json["accumulated_metrics"];
+            float sum_mAP50 = accum["sum_mAP50"].get<float>() + result.mAP50;
+            float sum_mAP50_95 = accum["sum_mAP50_95"].get<float>() + result.mAP50_95;
+            float sum_precision = accum["sum_precision"].get<float>() + result.precision;
+            float sum_recall = accum["sum_recall"].get<float>() + result.recall;
+            
+            // 更新累积和
+            accum["sum_mAP50"] = sum_mAP50;
+            accum["sum_mAP50_95"] = sum_mAP50_95;
+            accum["sum_precision"] = sum_precision;
+            accum["sum_recall"] = sum_recall;
+            
+            // 对于检测任务，使用processed_images作为唯一的计数器
+            int processed_count = result_json.contains("processed_images") ? 
+                                 result_json["processed_images"].get<int>() : 0;
+            processed_count++;
+            
+            // 计算新的平均指标
+            result_json["metrics"]["mAP50"] = sum_mAP50 / processed_count;
+            result_json["metrics"]["mAP50-95"] = sum_mAP50_95 / processed_count;
+            result_json["metrics"]["precision"] = sum_precision / processed_count;
+            result_json["metrics"]["recall"] = sum_recall / processed_count;
+            
+            // 更新计数
+            result_json["processed_images"] = processed_count;
         } else if (task_type == "classification") {
-            // 更新分类相关的metrics
+            int img_count = result_json.contains("processed_images") ? result_json["processed_images"].get<int>() : 0;
             auto& metrics = result_json["metrics"];
-            if (result.acc1 > 0) metrics["top1_accuracy"] = result.acc1;
-            if (result.acc5 > 0) metrics["top5_accuracy"] = result.acc5;
+            float current_acc = result.acc1 > 0.5f ? 1.0f : 0.0f;
+            float prev_acc = metrics["top1_accuracy"].get<float>();
+            // (旧平均值 * 旧样本数 + 新值) / 新样本数
+            float new_acc = (prev_acc * img_count + current_acc) / (img_count + 1);
+            metrics["top1_accuracy"] = new_acc;
+            float current_acc5 = result.acc5 > 0.5f ? 1.0f : 0.0f;
+            float prev_acc5 = metrics["top5_accuracy"].get<float>();
+            float new_acc5 = (prev_acc5 * img_count + current_acc5) / (img_count + 1);
+            metrics["top5_accuracy"] = new_acc5;
         }
         
         result_json["processed_images"] = img_count + 1;
