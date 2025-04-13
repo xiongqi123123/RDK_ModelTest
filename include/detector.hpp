@@ -50,6 +50,7 @@ enum ModelType {
     YOLOV5 = 0,   // YOLOv5系列模型
     YOLO11 = 1,   // YOLO11系列模型
     YOLOV8 = 2,   // YOLOv8系列模型
+    YOLOV8_SEG = 3, // YOLOv8分割模型
     UNKNOWN = -1  // 未知模型类型
 };
 
@@ -77,6 +78,13 @@ struct BBoxInfo {
     int class_id;
     std::string class_name;
     float confidence;
+};
+
+struct detection_result_t {
+    cv::Rect bbox;
+    float score;
+    int class_id;
+    cv::Mat mask;
 };
 
 class BPU_Detect{
@@ -107,6 +115,7 @@ class BPU_Detect{
         bool Model_Detection_Postprocess();
         bool Model_Detection_Postprocess_YOLO11(); // YOLO11专用后处理
         bool Model_Detection_Postprocess_YOLOV8(); // YOLOv8专用后处理
+        bool Model_Segmentation_Postprocess_YOLOV8(); // YOLOv8-Seg专用后处理
         void Model_Process_FeatureMap(hbDNNTensor& output_tensor, 
                                      int feature_h, 
                                      int feature_w, 
@@ -120,6 +129,10 @@ class BPU_Detect{
                                    int feature_h,
                                    int feature_w,
                                    float stride); // YOLOv8专用特征图处理
+        void Model_Process_FeatureMap_YOLOV8_SEG(hbDNNTensor& output_tensor,
+                                   int feature_h,
+                                   int feature_w,
+                                   float stride); // YOLOv8-Seg专用特征图处理
         bool Model_Classification_Postprocess();
         bool Model_Postprocess();
         void Model_Draw();
@@ -175,7 +188,7 @@ class BPU_Detect{
 
         int input_h_;// 输入高度
         int input_w_;// 输入宽度
-        int output_order_[6];// 输出顺序映射，YOLO11有6个输出
+        int output_order_[10]; // 输出顺序映射，YOLOv8-Seg有10个输出
 
         float x_scale_;                          // X方向缩放比例
         float y_scale_;                          // Y方向缩放比例
@@ -199,6 +212,14 @@ class BPU_Detect{
         std::vector<std::string> class_names_;         // 类别名称
         std::string label_path_;
         std::vector<BBoxInfo> gt_boxes_; // Ground truth boxes from label data
+
+        // 使用现有成员变量存储分割掩码数据
+        // bboxes_, scores_, indices_保持不变，用于检测结果
+        // 将分割掩码数据存储在这些额外的变量中
+        std::vector<cv::Mat> masks_; // 存储每个最终检测实例的二值掩码 (尺寸与原图相同)
+        cv::Mat proto_;             // 存储原型掩码 (来自模型输出 H/4 x W/4 x 32)
+        std::vector<std::vector<float>> mask_coeffs_; // 存储每个通过NMS的检测框的32个掩码系数
+        
 };
 
 #endif // DETECTOR_H

@@ -261,18 +261,18 @@ int main(int argc, char *argv[])
             continue;
         }
 
-        // 输出性能指标
-        printf("Performance metrics for image %zu:\n", i + 1);
-        printf("  FPS: %.2f\n", result.fps);
-        printf("  Preprocess time: %.2f ms\n", result.preprocess_time);
-        printf("  Inference time: %.2f ms\n", result.inference_time);
-        printf("  Postprocess time: %.2f ms\n", result.postprocess_time);
-        printf("  Total time: %.2f ms\n", result.total_time);
-        printf("  Precision: %.4f\n", result.precision);
-        printf("  Recall: %.4f\n", result.recall);
-        printf("  mAP@0.5: %.4f\n", result.mAP50);
-        printf("  mAP@0.5:0.95: %.4f\n", result.mAP50_95);
-        printf("  Result image saved to: %s\n", result.result_path.c_str());
+        // // 输出性能指标
+        // printf("Performance metrics for image %zu:\n", i + 1);
+        // printf("  FPS: %.2f\n", result.fps);
+        // printf("  Preprocess time: %.2f ms\n", result.preprocess_time);
+        // printf("  Inference time: %.2f ms\n", result.inference_time);
+        // printf("  Postprocess time: %.2f ms\n", result.postprocess_time);
+        // printf("  Total time: %.2f ms\n", result.total_time);
+        // printf("  Precision: %.4f\n", result.precision);
+        // printf("  Recall: %.4f\n", result.recall);
+        // printf("  mAP@0.5: %.4f\n", result.mAP50);
+        // printf("  mAP@0.5:0.95: %.4f\n", result.mAP50_95);
+        // printf("  Result image saved to: %s\n", result.result_path.c_str());
     }
 
     // 释放资源
