@@ -42,9 +42,7 @@
 #define DEFAULT_FONT_THICKNESS 1.0f // 绘制标签的字体粗细, 默认 1.0
 #define DEFAULT_LINE_SIZE 2.0f // 绘制矩形框的线宽, 默认2.0
 
-// YOLOv11特有常量
-#define REG 16  // 离散化程度的超参数，YOLO11中使用
-
+#define REG 16  // 离散化程度的超参数
 // 模型类型枚举
 enum ModelType {
     YOLOV5 = 0,   // YOLOv5系列模型
@@ -129,10 +127,12 @@ class BPU_Detect{
                                    int feature_h,
                                    int feature_w,
                                    float stride); // YOLOv8专用特征图处理
-        void Model_Process_FeatureMap_YOLOV8_SEG(hbDNNTensor& output_tensor,
-                                   int feature_h,
-                                   int feature_w,
-                                   float stride); // YOLOv8-Seg专用特征图处理
+        void Model_Process_FeatureMap_YOLOV8_SEG(
+                                   int scale_idx,
+                                   std::vector<cv::Rect2d>& decoded_bboxes_all,
+                                   std::vector<float>& decoded_scores_all,
+                                   std::vector<int>& decoded_classes_all,
+                                   std::vector<std::vector<float>>& decoded_mces_all); // YOLOv8-Seg专用特征图处理
         bool Model_Classification_Postprocess();
         bool Model_Postprocess();
         void Model_Draw();

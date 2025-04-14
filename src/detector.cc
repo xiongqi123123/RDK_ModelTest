@@ -1789,56 +1789,14 @@ bool BPU_Detect::Model_Detection_Postprocess_YOLOV8() {
 }
 
 
-// --- 添加 YOLOv8-Seg 后处理函数实现 --- 
-// Helper function for softmax needed in DFL decoding
-std::vector<float> softmax(const float* input, size_t size) {
-    std::vector<float> result(size);
-    if (size == 0) return result; // Handle empty input
-    float max_val = input[0];
-    for (size_t i = 1; i < size; ++i) {
-        if (input[i] > max_val) {
-            max_val = input[i];
-        }
-    }
-    float sum_exp = 0.0f;
-    for (size_t i = 0; i < size; ++i) {
-        result[i] = std::exp(input[i] - max_val);
-        sum_exp += result[i];
-    }
-    // Add epsilon for stability, check if sum_exp is near zero
-    float denominator = sum_exp > 1e-9 ? sum_exp : 1e-9;
-    for (size_t i = 0; i < size; ++i) {
-        result[i] /= denominator;
-    }
-    return result;
-}
-
-bool BPU_Detect::Model_Segmentation_Postprocess_YOLOV8() {
-    std::cout << "Starting YOLOv8 Segmentation Postprocess..." << std::endl;
-    // 0. 清空旧结果
-    bboxes_.clear();
-    scores_.clear();
-    indices_.clear(); // indices_ will store final NMS indices mapped to original detections
-    masks_.clear();
-    mask_coeffs_.clear(); 
-
-    bboxes_.resize(classes_num_);
-    scores_.resize(classes_num_);
-    indices_.resize(classes_num_); 
-
-    // 临时存储解码后的结果 (在 NMS 之前)
-    std::vector<cv::Rect2d> decoded_bboxes_all; // BBoxes at model input size (e.g., 640x640)
-    std::vector<float> decoded_scores_all;
-    std::vector<int> decoded_classes_all;
-    std::vector<std::vector<float>> decoded_mces_all; // Mask coefficients for each box
-
-    float conf_thres_raw = -log(1 / score_threshold_ - 1);
-    const int MCE_CHANNELS = 32; // Mask coefficients channels
-    const int REG_MAX = 16;     // For DFL decoding
-    std::vector<float> dfl_weights(REG_MAX);
-    for(int i=0; i<REG_MAX; ++i) dfl_weights[i] = static_cast<float>(i);
-
-    // 1. 处理三个尺度的特征图
+// --- YOLOv8-Seg 特征图处理函数 ---
+void BPU_Detect::Model_Process_FeatureMap_YOLOV8_SEG(
+    int scale_idx,
+    std::vector<cv::Rect2d>& decoded_bboxes_all,
+    std::vector<float>& decoded_scores_all,
+    std::vector<int>& decoded_classes_all,
+    std::vector<std::vector<float>>& decoded_mces_all)
+{
     float strides[] = {8.0f, 16.0f, 32.0f};
     int feature_hs[] = {H_8_, H_16_, H_32_};
     int feature_ws[] = {W_8_, W_16_, W_32_};
@@ -1846,129 +1804,171 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLOV8() {
     int cls_indices[] = {output_order_[3], output_order_[4], output_order_[5]}; // Class outputs
     int mce_indices[] = {output_order_[6], output_order_[7], output_order_[8]}; // Mask coeff outputs
 
+    float stride = strides[scale_idx];
+    int feature_h = feature_hs[scale_idx];
+    int feature_w = feature_ws[scale_idx];
+    int reg_idx = reg_indices[scale_idx];
+    int cls_idx = cls_indices[scale_idx];
+    int mce_idx = mce_indices[scale_idx];
+
+    float conf_thres_raw = -log(1 / score_threshold_ - 1);
+    const int MCE_CHANNELS = 32; 
+    std::vector<float> dfl_weights(REG);
+    for(int i=0; i<REG; ++i) dfl_weights[i] = static_cast<float>(i);
+
+    // 检查索引有效性
+    if (reg_idx < 0 || cls_idx < 0 || mce_idx < 0 ||
+        reg_idx >= output_count_ || cls_idx >= output_count_ || mce_idx >= output_count_) {
+        std::cerr << "Error: Invalid output tensor index for scale " << stride << std::endl;
+        return; 
+    }
+
+    hbDNNTensor& reg_tensor = output_tensors_[reg_idx];
+    hbDNNTensor& cls_tensor = output_tensors_[cls_idx];
+    hbDNNTensor& mce_tensor = output_tensors_[mce_idx];
+
+    if (reg_tensor.properties.quantiType != SCALE ||
+        cls_tensor.properties.quantiType != NONE ||
+        mce_tensor.properties.quantiType != SCALE) {
+        std::cerr << "Warning: Unexpected quantization type for YOLOv8-Seg output at scale " << stride
+                  << ". Reg: " << reg_tensor.properties.quantiType
+                  << ", Cls: " << cls_tensor.properties.quantiType
+                  << ", MCE: " << mce_tensor.properties.quantiType << std::endl;
+    }
+
+    // 刷新内存
+    hbSysFlushMem(&reg_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
+    hbSysFlushMem(&cls_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
+    hbSysFlushMem(&mce_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
+
+    // 获取数据指针和量化尺度
+    auto* reg_raw = reinterpret_cast<int32_t*>(reg_tensor.sysMem[0].virAddr);
+    auto* reg_scale_ptr = reinterpret_cast<float*>(reg_tensor.properties.scale.scaleData);
+    float reg_scale = (reg_scale_ptr != nullptr) ? reg_scale_ptr[0] : 1.0f;
+
+    auto* cls_raw = reinterpret_cast<float*>(cls_tensor.sysMem[0].virAddr);
+
+    auto* mce_raw = reinterpret_cast<int32_t*>(mce_tensor.sysMem[0].virAddr);
+    auto* mce_scale_ptr = reinterpret_cast<float*>(mce_tensor.properties.scale.scaleData);
+    std::vector<float> mce_scales(MCE_CHANNELS, (mce_scale_ptr != nullptr) ? mce_scale_ptr[0] : 1.0f);
+
+    int reg_channels = 4 * REG; 
+
+    // 遍历特征图
+    for (int h = 0; h < feature_h; ++h) {
+        for (int w = 0; w < feature_w; ++w) {
+            int current_offset = h * feature_w + w;
+            float* cur_cls_raw = cls_raw + current_offset * classes_num_;
+            int32_t* cur_reg_raw = reg_raw + current_offset * reg_channels;
+            int32_t* cur_mce_raw = mce_raw + current_offset * MCE_CHANNELS;
+
+            // 找到分数最大的类别
+            int cls_id = 0;
+            for (int i = 1; i < classes_num_; ++i) {
+                if (cur_cls_raw[i] > cur_cls_raw[cls_id]) {
+                    cls_id = i;
+                }
+            }
+
+            // 阈值过滤
+            if (cur_cls_raw[cls_id] < conf_thres_raw) {
+                continue;
+            }
+
+            // 计算置信度 (Sigmoid)
+            float score = 1.0f / (1.0f + std::exp(-cur_cls_raw[cls_id]));
+
+            // DFL解码边界框
+            float ltrb[4] = {0.0f};
+            std::vector<float> temp_dist(REG);
+            for (int i = 0; i < 4; ++i) {
+                // Dequantize
+                for (int j = 0; j < REG; ++j) {
+                    temp_dist[j] = float(cur_reg_raw[i * REG + j]) * reg_scale;
+                }
+
+                std::vector<float> prob(REG);
+                float max_val = temp_dist[0];
+                for (int j = 1; j < REG; ++j) {
+                    if (temp_dist[j] > max_val) {
+                        max_val = temp_dist[j];
+                    }
+                }
+                float sum_exp = 0.0f;
+                for (int j = 0; j < REG; ++j) {
+                    prob[j] = std::exp(temp_dist[j] - max_val);
+                    sum_exp += prob[j];
+                }
+                float denominator = sum_exp > 1e-9 ? sum_exp : 1e-9; 
+                for (int j = 0; j < REG; ++j) {
+                    prob[j] /= denominator;
+                }
+
+                for (int j = 0; j < REG; ++j) {
+                    ltrb[i] += prob[j] * dfl_weights[j];
+                }
+            }
+
+            if (ltrb[2] + ltrb[0] <= 0 || ltrb[3] + ltrb[1] <= 0) continue;
+
+            float x1 = (w + 0.5f - ltrb[0]) * stride;
+            float y1 = (h + 0.5f - ltrb[1]) * stride;
+            float x2 = (w + 0.5f + ltrb[2]) * stride;
+            float y2 = (h + 0.5f + ltrb[3]) * stride;
+
+            // 反量化掩码系数
+            std::vector<float> current_mce(MCE_CHANNELS);
+            for (int k = 0; k < MCE_CHANNELS; ++k) {
+                current_mce[k] = float(cur_mce_raw[k]) * mce_scales[k];
+            }
+
+            // 保存解码结果 
+            decoded_bboxes_all.push_back(cv::Rect2d(x1, y1, x2 - x1, y2 - y1));
+            decoded_scores_all.push_back(score);
+            decoded_classes_all.push_back(cls_id);
+            decoded_mces_all.push_back(current_mce);
+        }
+    }
+}
+
+bool BPU_Detect::Model_Segmentation_Postprocess_YOLOV8() {
+    std::cout << "Starting YOLOv8 Segmentation Postprocess..." << std::endl;
+    // 0. 清空旧结果
+    bboxes_.clear();
+    scores_.clear();
+    indices_.clear(); 
+    masks_.clear();
+    mask_coeffs_.clear();
+
+    bboxes_.resize(classes_num_);
+    scores_.resize(classes_num_);
+    indices_.resize(classes_num_);
+
+    // 临时存储解码后的结果 (在 NMS 之前)
+    std::vector<cv::Rect2d> decoded_bboxes_all; // BBoxes at model input size (e.g., 640x640)
+    std::vector<float> decoded_scores_all;
+    std::vector<int> decoded_classes_all;
+    std::vector<std::vector<float>> decoded_mces_all; // Mask coefficients for each box
+
+    // 1. 调用新的特征图处理函数处理三个尺度
     std::cout << "Processing feature maps..." << std::endl;
     for (int scale_idx = 0; scale_idx < 3; ++scale_idx) {
-        float stride = strides[scale_idx];
-        int feature_h = feature_hs[scale_idx];
-        int feature_w = feature_ws[scale_idx];
-        int reg_idx = reg_indices[scale_idx];
-        int cls_idx = cls_indices[scale_idx];
-        int mce_idx = mce_indices[scale_idx];
-
-        // 检查索引有效性
-        if (reg_idx < 0 || cls_idx < 0 || mce_idx < 0 || 
-            reg_idx >= output_count_ || cls_idx >= output_count_ || mce_idx >= output_count_) {
-            std::cerr << "Error: Invalid output tensor index for scale " << stride << std::endl;
-            return false;
-        }
-
-        hbDNNTensor& reg_tensor = output_tensors_[reg_idx];
-        hbDNNTensor& cls_tensor = output_tensors_[cls_idx];
-        hbDNNTensor& mce_tensor = output_tensors_[mce_idx];
-
-        // 检查量化类型
-        // Assuming Reg and MCE are SCALE, Cls is NONE (float)
-        if (reg_tensor.properties.quantiType != SCALE ||
-            cls_tensor.properties.quantiType != NONE || 
-            mce_tensor.properties.quantiType != SCALE) { 
-            std::cerr << "Warning: Unexpected quantization type for YOLOv8-Seg output at scale " << stride 
-                      << ". Reg: " << reg_tensor.properties.quantiType 
-                      << ", Cls: " << cls_tensor.properties.quantiType 
-                      << ", MCE: " << mce_tensor.properties.quantiType << std::endl;
-            // Continue processing, but results might be incorrect
-        }
-
-        // 刷新内存
-        hbSysFlushMem(&reg_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
-        hbSysFlushMem(&cls_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
-        hbSysFlushMem(&mce_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
-
-        // 获取数据指针和量化尺度
-        auto* reg_raw = reinterpret_cast<int32_t*>(reg_tensor.sysMem[0].virAddr);
-        auto* reg_scale_ptr = reinterpret_cast<float*>(reg_tensor.properties.scale.scaleData);
-        float reg_scale = (reg_scale_ptr != nullptr) ? reg_scale_ptr[0] : 1.0f; // 添加空指针检查
-        
-        auto* cls_raw = reinterpret_cast<float*>(cls_tensor.sysMem[0].virAddr);
-        
-        auto* mce_raw = reinterpret_cast<int32_t*>(mce_tensor.sysMem[0].virAddr);
-        auto* mce_scale_ptr = reinterpret_cast<float*>(mce_tensor.properties.scale.scaleData);
-        // 同样假设MCE使用第一个尺度因子
-        std::vector<float> mce_scales(MCE_CHANNELS, (mce_scale_ptr != nullptr) ? mce_scale_ptr[0] : 1.0f); // 添加空指针检查
-
-        int reg_channels = 4 * REG_MAX; // e.g., 64
-
-        // 遍历特征图
-        for (int h = 0; h < feature_h; ++h) {
-            for (int w = 0; w < feature_w; ++w) {
-                int current_offset = h * feature_w + w;
-                float* cur_cls_raw = cls_raw + current_offset * classes_num_;
-                int32_t* cur_reg_raw = reg_raw + current_offset * reg_channels;
-                int32_t* cur_mce_raw = mce_raw + current_offset * MCE_CHANNELS;
-
-                // 找到分数最大的类别
-                int cls_id = 0;
-                for (int i = 1; i < classes_num_; ++i) {
-                    if (cur_cls_raw[i] > cur_cls_raw[cls_id]) {
-                        cls_id = i;
-                    }
-                }
-
-                // 阈值过滤
-                if (cur_cls_raw[cls_id] < conf_thres_raw) {
-                    continue;
-                }
-
-                // 计算置信度 (Sigmoid)
-                float score = 1.0f / (1.0f + std::exp(-cur_cls_raw[cls_id]));
-
-                // DFL解码边界框
-                float ltrb[4] = {0.0f};
-                std::vector<float> temp_dist(REG_MAX);
-                for (int i = 0; i < 4; ++i) {
-                    // Dequantize and apply softmax
-                    for (int j = 0; j < REG_MAX; ++j) {
-                        // 使用单个 reg_scale
-                        temp_dist[j] = float(cur_reg_raw[i * REG_MAX + j]) * reg_scale;
-                    }
-                    std::vector<float> prob = softmax(temp_dist.data(), REG_MAX);
-                    
-                    // Calculate expectation
-                    for (int j = 0; j < REG_MAX; ++j) {
-                        ltrb[i] += prob[j] * dfl_weights[j];
-                    }
-                }
-
-                if (ltrb[2] + ltrb[0] <= 0 || ltrb[3] + ltrb[1] <= 0) continue;
-
-                float x1 = (w + 0.5f - ltrb[0]) * stride;
-                float y1 = (h + 0.5f - ltrb[1]) * stride;
-                float x2 = (w + 0.5f + ltrb[2]) * stride;
-                float y2 = (h + 0.5f + ltrb[3]) * stride;
-
-                // 反量化掩码系数
-                std::vector<float> current_mce(MCE_CHANNELS);
-                for (int k = 0; k < MCE_CHANNELS; ++k) {
-                    // 使用 mce_scales[k] (现在都等于 mce_scale_ptr[0] 或 1.0f)
-                    current_mce[k] = float(cur_mce_raw[k]) * mce_scales[k];
-                }
-
-                // 保存解码结果
-                decoded_bboxes_all.push_back(cv::Rect2d(x1, y1, x2 - x1, y2 - y1));
-                decoded_scores_all.push_back(score);
-                decoded_classes_all.push_back(cls_id);
-                decoded_mces_all.push_back(current_mce);
-            }
-        }
+        Model_Process_FeatureMap_YOLOV8_SEG(
+            scale_idx,
+            decoded_bboxes_all,
+            decoded_scores_all,
+            decoded_classes_all,
+            decoded_mces_all
+        );
     }
     std::cout << "Feature map processing done. Total detections before NMS: " << decoded_bboxes_all.size() << std::endl;
 
     // 2. 执行 NMS
-    std::vector<int> nms_indices_output; // Stores indices of boxes kept after NMS
-    std::vector<int> original_indices_map;
+    std::vector<int> nms_indices_output; 
+    std::vector<int> original_indices_map; 
     if (!decoded_bboxes_all.empty()) {
          std::vector<cv::Rect> nms_bboxes_cv;
          std::vector<float> nms_scores_filtered;
-          // Map index in nms_bboxes_cv back to decoded_*_all
 
          for(size_t idx = 0; idx < decoded_bboxes_all.size(); ++idx) {
               const auto& box = decoded_bboxes_all[idx];
@@ -1982,8 +1982,7 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLOV8() {
 
               nms_bboxes_cv.push_back(cv::Rect(x, y, width, height));
               nms_scores_filtered.push_back(decoded_scores_all[idx]);
-              original_indices_map.push_back(idx); // Store original index
-         }
+              original_indices_map.push_back(idx); 
 
          if (!nms_bboxes_cv.empty()){
             cv::dnn::NMSBoxes(nms_bboxes_cv, nms_scores_filtered, score_threshold_, nms_threshold_, nms_indices_output);
@@ -1993,19 +1992,17 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLOV8() {
          }
     } else {
          std::cout << "No detections before NMS." << std::endl;
-         return true; // No detections, finish successfully
+         return true;
     }
 
-    // 3. 处理 NMS 后的结果
-    masks_.clear();
-    mask_coeffs_.clear(); // Clear if you store them
+    // 3. 处理 NMS 后的结果并生成掩码
+    const int MCE_CHANNELS = 32; 
 
-    // --- 重新添加临时变量存储最终结果 ---
+    // --- 临时变量存储最终结果 ---
     std::vector<cv::Rect2d> final_bboxes;
     std::vector<float> final_scores;
     std::vector<int> final_class_ids;
     std::vector<int> final_mask_indices; // 存储对应 masks_ 的索引
-    // --- 结束重新添加 ---
 
     // 获取原型掩码输出
     int proto_idx = output_order_[9];
@@ -2022,59 +2019,67 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLOV8() {
     if (proto_tensor.properties.validShape.numDimensions != 4 ||
         proto_tensor.properties.validShape.dimensionSize[0] != 1 ||
         proto_tensor.properties.validShape.dimensionSize[3] != MCE_CHANNELS) {
-        std::cerr << "Error: Invalid proto tensor shape." << std::endl;
+        std::cerr << "Error: Invalid proto tensor shape. Dimensions: "
+                  << proto_tensor.properties.validShape.numDimensions
+                  << ", Size: (" << proto_tensor.properties.validShape.dimensionSize[0] << ","
+                  << proto_tensor.properties.validShape.dimensionSize[1] << ","
+                  << proto_tensor.properties.validShape.dimensionSize[2] << ","
+                  << proto_tensor.properties.validShape.dimensionSize[3] << ")"
+                  << ", Expected Channels: " << MCE_CHANNELS << std::endl;
         return false;
     }
-    int proto_h = proto_tensor.properties.validShape.dimensionSize[1];
-    int proto_w = proto_tensor.properties.validShape.dimensionSize[2];
+    int proto_h = proto_tensor.properties.validShape.dimensionSize[1]; 
+    int proto_w = proto_tensor.properties.validShape.dimensionSize[2]; 
     auto* proto_data = reinterpret_cast<float*>(proto_tensor.sysMem[0].virAddr);
     cv::Mat proto_mat(proto_h * proto_w, MCE_CHANNELS, CV_32F, proto_data);
-    proto_mat = proto_mat.reshape(1, {proto_h, proto_w});
+
 
     std::cout << "Processing NMS results and generating masks..." << std::endl;
     // --- 遍历 NMS 后的索引 ---
-    // Use nms_indices_output which contains indices into the filtered nms_bboxes_cv/nms_scores_filtered
     for (int filtered_idx : nms_indices_output) {
-         // Map back to the original index in decoded_*_all using original_indices_map
          if (filtered_idx < 0 || filtered_idx >= static_cast<int>(original_indices_map.size())) {
-             std::cerr << "Error: Invalid index from NMSBoxes output." << std::endl;
+             std::cerr << "Error: Invalid index (" << filtered_idx << ") from NMSBoxes output. Max index: " << original_indices_map.size() - 1 << std::endl;
              continue;
          }
-         int original_idx = original_indices_map[filtered_idx]; // Get the original index
+         int original_idx = original_indices_map[filtered_idx]; 
+
+         // --- 安全检查 original_idx ---
+         if (original_idx < 0 || original_idx >= static_cast<int>(decoded_bboxes_all.size())) {
+             std::cerr << "Error: Invalid original index (" << original_idx << ") mapped from NMSBoxes. Max index: " << decoded_bboxes_all.size() - 1 << std::endl;
+             continue;
+         }
 
          // Retrieve data using the original index
          int cls_id = decoded_classes_all[original_idx];
-         cv::Rect2d bbox = decoded_bboxes_all[original_idx];
-         float score = decoded_scores_all[original_idx];
+         cv::Rect2d bbox = decoded_bboxes_all[original_idx]; 
          std::vector<float> mce = decoded_mces_all[original_idx];
 
         // --- 步骤 4-9: 生成实例掩码 final_mask_original_size ---
-        // 4. 生成实例掩码 (低分辨率)
-        cv::Mat mce_mat(1, MCE_CHANNELS, CV_32F, mce.data());
-        cv::Mat proto_flat = proto_mat.reshape(1, proto_h * proto_w);
-        cv::Mat instance_mask_flat = proto_flat * mce_mat.t();
+        // 4. 生成实例掩码 (低分辨率 proto_h x proto_w)
+        cv::Mat mce_mat(1, MCE_CHANNELS, CV_32F, mce.data()); 
+        cv::Mat instance_mask_flat = proto_mat * mce_mat.t();
         cv::Mat instance_mask_low_res = instance_mask_flat.reshape(1, proto_h);
 
         // 5. 应用 sigmoid
         cv::Mat sigmoid_mask;
         cv::exp(-instance_mask_low_res, sigmoid_mask);
-        sigmoid_mask = 1.0 / (1.0 + sigmoid_mask);
+        sigmoid_mask = 1.0 / (1.0 + sigmoid_mask); 
 
         // 6. 将完整的 sigmoid 掩码上采样到输入尺寸 (input_h_ x input_w_)
         cv::Mat resized_sigmoid_mask;
         cv::resize(sigmoid_mask, resized_sigmoid_mask, cv::Size(input_w_, input_h_), 0, 0, cv::INTER_LINEAR);
 
-        // 7. 阈值化得到二值掩码
-        cv::Mat binary_mask_input_size;
+        // 7. 阈值化得到二值掩码 (input_h_ x input_w_)
+        cv::Mat binary_mask_input_size; 
         cv::threshold(resized_sigmoid_mask, binary_mask_input_size, 0.5, 1.0, cv::THRESH_BINARY);
 
-        // 8. 计算原始图像中的 ROI 区域
+        // 8. 计算原始图像中的 ROI 区域 (将 input_size bbox 映射回 original image size)
         float original_x1 = (bbox.x - x_shift_) / x_scale_;
         float original_y1 = (bbox.y - y_shift_) / y_scale_;
         float original_width = bbox.width / x_scale_;
         float original_height = bbox.height / y_scale_;
-        int orig_img_w = input_img_.cols;
-        int orig_img_h = input_img_.rows;
+        int orig_img_w = input_img_.cols; 
+        int orig_img_h = input_img_.rows; 
         original_x1 = std::max(0.0f, std::min((float)orig_img_w - 1, original_x1));
         original_y1 = std::max(0.0f, std::min((float)orig_img_h - 1, original_y1));
         original_width = std::max(1.0f, std::min((float)orig_img_w - original_x1, original_width));
@@ -2086,26 +2091,21 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLOV8() {
 
         // 9. 将二值掩码调整到原始 ROI 尺寸并放置到最终掩码中
         cv::Mat final_mask_original_size = cv::Mat::zeros(orig_img_h, orig_img_w, CV_8UC1);
-        cv::Mat resized_binary_mask;
+        cv::Mat resized_binary_mask; 
+
         if (!binary_mask_input_size.empty() && binary_mask_input_size.rows > 0 && binary_mask_input_size.cols > 0) {
-             // 只调整 ROI 部分的二值掩码
-             // 首先，我们需要从 binary_mask_input_size 中提取对应于 bbox 的区域
-             // 注意：这里的 bbox 仍然是相对于 input_size 的坐标
              int input_roi_x = std::max(0, static_cast<int>(bbox.x));
              int input_roi_y = std::max(0, static_cast<int>(bbox.y));
-             int input_roi_w = std::min(input_w_ - input_roi_x, static_cast<int>(bbox.width));
-             int input_roi_h = std::min(input_h_ - input_roi_y, static_cast<int>(bbox.height));
+             int input_roi_w = std::min(binary_mask_input_size.cols - input_roi_x, static_cast<int>(bbox.width));
+             int input_roi_h = std::min(binary_mask_input_size.rows - input_roi_y, static_cast<int>(bbox.height));
 
              if (input_roi_w > 0 && input_roi_h > 0) {
                  cv::Mat binary_mask_roi_input = binary_mask_input_size(cv::Rect(input_roi_x, input_roi_y, input_roi_w, input_roi_h));
 
-                 // 检查提取的 ROI 是否有效
                  if (!binary_mask_roi_input.empty() && binary_mask_roi_input.rows > 0 && binary_mask_roi_input.cols > 0) {
-                     // 将提取的 ROI 调整到原始图像 ROI 尺寸
                      cv::resize(binary_mask_roi_input, resized_binary_mask, original_roi.size(), 0, 0, cv::INTER_NEAREST);
                      resized_binary_mask.convertTo(resized_binary_mask, CV_8UC1, 255);
 
-                     // 确保目标 ROI 在最终掩码范围内
                      if (original_roi.x >= 0 && original_roi.y >= 0 &&
                          original_roi.width > 0 && original_roi.height > 0 &&
                          original_roi.x + original_roi.width <= final_mask_original_size.cols &&
@@ -2113,31 +2113,32 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLOV8() {
                      {
                          resized_binary_mask.copyTo(final_mask_original_size(original_roi));
                      } else {
-                          std::cerr << "Warning: Invalid calculated original ROI for mask placement. ROI: " << original_roi << std::endl;
+                          std::cerr << "Warning: Invalid calculated original ROI for mask placement. ROI: " << original_roi
+                                    << ", Mask Size: " << final_mask_original_size.size() << std::endl;
                      }
                  } else {
-                     std::cerr << "Warning: Extracted binary_mask_roi_input is empty or invalid. Input ROI: " << cv::Rect(input_roi_x, input_roi_y, input_roi_w, input_roi_h) << std::endl;
+                     std::cerr << "Warning: Extracted binary_mask_roi_input is empty or invalid. Input ROI Rect: "
+                               << cv::Rect(input_roi_x, input_roi_y, input_roi_w, input_roi_h) << std::endl;
                  }
              } else {
-                  std::cerr << "Warning: Invalid input ROI calculated. Input ROI: " << cv::Rect(input_roi_x, input_roi_y, input_roi_w, input_roi_h) << std::endl;
+                  std::cerr << "Warning: Invalid input ROI calculated (width or height <= 0). Input ROI Rect: "
+                            << cv::Rect(input_roi_x, input_roi_y, input_roi_w, input_roi_h) << std::endl;
              }
          } else {
-              std::cerr << "Warning: binary_mask_input_size is empty or has invalid dimensions, cannot resize. Size: [" << binary_mask_input_size.cols << "x" << binary_mask_input_size.rows << "]" << std::endl;
+              std::cerr << "Warning: binary_mask_input_size is empty or has invalid dimensions, cannot extract ROI. Size: ["
+                        << binary_mask_input_size.cols << "x" << binary_mask_input_size.rows << "]" << std::endl;
          }
-        // --- 结束掩码生成 ---
 
         // 10. 保存结果到临时变量和 masks_
-        masks_.push_back(final_mask_original_size);
+        masks_.push_back(final_mask_original_size); 
 
-        // --- 保存到临时最终结果列表 ---
-        final_bboxes.push_back(bbox);
+        final_bboxes.push_back(bbox); 
         final_scores.push_back(score);
         final_class_ids.push_back(cls_id);
-        final_mask_indices.push_back(masks_.size() - 1);
+        final_mask_indices.push_back(masks_.size() - 1); 
     }
 
     // --- 清理并重新填充 bboxes_, scores_, indices_ ---
-    // ... (这部分逻辑与之前相同，使用 final_* 向量填充 bboxes_, scores_, indices_) ...
      for(auto& vec : bboxes_) vec.clear();
      for(auto& vec : scores_) vec.clear();
      for(auto& vec : indices_) vec.clear();
@@ -2145,15 +2146,13 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLOV8() {
      for (size_t k = 0; k < final_bboxes.size(); ++k) {
          int cls_id = final_class_ids[k];
          if (cls_id >= 0 && cls_id < classes_num_) {
-             bboxes_[cls_id].push_back(final_bboxes[k]);
-             scores_[cls_id].push_back(final_scores[k]);
-             indices_[cls_id].push_back(final_mask_indices[k]); // Store the index into masks_ vector
+             bboxes_[cls_id].push_back(final_bboxes[k]);      
+             scores_[cls_id].push_back(final_scores[k]);      
+             indices_[cls_id].push_back(final_mask_indices[k]); 
          } else {
               std::cerr << "Warning: Invalid class ID (" << cls_id << ") encountered after NMS. Skipping result." << std::endl;
          }
      }
-    // --- 结束修改存储方式 ---
-
 
     std::cout << "Segmentation post-processing finished. Stored " << masks_.size() << " final masks." << std::endl;
 
