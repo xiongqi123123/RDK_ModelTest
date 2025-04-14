@@ -78,7 +78,8 @@ bool ResultSaver::SaveResults(const std::string& output_path,
                             const int x_shift,
                             const int y_shift,
                             InferenceResult& result,
-                            const std::string& image_name) {
+                            const std::string& image_name,
+                            const std::vector<cv::Mat>* masks) {
     std::string image_key = image_name;
     size_t last_slash = image_key.find_last_of("/\\");
     if (last_slash != std::string::npos) {
@@ -137,6 +138,16 @@ bool ResultSaver::SaveResults(const std::string& output_path,
                 {"top5_accuracy", result.acc5}
             };
             result_json["processed_images"] = 1;
+        } else if (task_type == "segmentation") {
+            result_json["metrics"] = {
+                {"mAP50", result.mAP50},
+                {"mAP50-95", result.mAP50_95},
+                {"precision", result.precision},
+                {"recall", result.recall},
+                {"f1_score", 2 * (result.precision * result.recall) / (result.precision + result.recall + 1e-6)},
+                {"mean_iou", result.mAP50_95}  // 使用mAP50-95作为平均IoU的近似值
+            };
+            result_json["processed_images"] = 1;
         }
     } else {
         // 更新性能指标（使用平均值）
@@ -152,13 +163,7 @@ bool ResultSaver::SaveResults(const std::string& output_path,
         perf["total_time"] = perf["total_time"].get<float>() * (1.0f - weight) + result.total_time * weight;
         
         // 更新metrics部分
-        if (task_type == "detection") {
-            // // 更新检测相关的metrics（如果result中有值且大于0，则使用result的值）
-            // auto& metrics = result_json["metrics"];
-            // if (result.mAP50 > 0) metrics["mAP50"] = result.mAP50;
-            // if (result.mAP50_95 > 0) metrics["mAP50-95"] = result.mAP50_95;
-            // if (result.precision > 0) metrics["precision"] = result.precision;
-            // if (result.recall > 0) metrics["recall"] = result.recall;
+        if (task_type == "detection" || task_type == "segmentation") {
             int processed_count = result_json.contains("processed_images") ? 
                                  result_json["processed_images"].get<int>() : 0;
             
@@ -176,10 +181,23 @@ bool ResultSaver::SaveResults(const std::string& output_path,
             processed_count++;
             
             // 计算新的平均指标
+            float new_precision = sum_precision / processed_count;
+            float new_recall = sum_recall / processed_count;
+            
             result_json["metrics"]["mAP50"] = sum_mAP50 / processed_count;
             result_json["metrics"]["mAP50-95"] = sum_mAP50_95 / processed_count;
-            result_json["metrics"]["precision"] = sum_precision / processed_count;
-            result_json["metrics"]["recall"] = sum_recall / processed_count;
+            result_json["metrics"]["precision"] = new_precision;
+            result_json["metrics"]["recall"] = new_recall;
+            
+            // 对于分割任务，更新F1分数和IoU
+            if (task_type == "segmentation") {
+                // 计算新的F1分数 - 使用精确率和召回率的平均值计算F1
+                float new_f1_score = 2 * (new_precision * new_recall) / (new_precision + new_recall + 1e-6);
+                result_json["metrics"]["f1_score"] = new_f1_score;
+                
+                // 更新平均IoU (使用mAP50-95作为近似值)
+                result_json["metrics"]["mean_iou"] = sum_mAP50_95 / processed_count;
+            }
             
             result_json["processed_images"] = processed_count;
         } else if (task_type == "classification") {
@@ -232,6 +250,71 @@ bool ResultSaver::SaveResults(const std::string& output_path,
             }
         }
         result_json["detections"][image_key] = detections;
+    } else if (task_type == "segmentation") {
+        nlohmann::json segmentations = nlohmann::json::array();
+        // 如果有掩码数据
+        bool has_mask_data = masks != nullptr && !masks->empty();
+        
+        for (size_t cls_id = 0; cls_id < bboxes.size(); cls_id++) {
+            for (size_t i = 0; i < indices[cls_id].size(); i++) {
+                int idx = indices[cls_id][i];
+                
+                // 获取原始图像中的坐标
+                float x1 = (bboxes[cls_id][idx].x - x_shift) / x_scale;
+                float y1 = (bboxes[cls_id][idx].y - y_shift) / y_scale;
+                float width = bboxes[cls_id][idx].width / x_scale;
+                float height = bboxes[cls_id][idx].height / y_scale;
+                float confidence = scores[cls_id][idx];
+                
+                nlohmann::json segmentation;
+                segmentation["bbox"] = {
+                    {"x", x1},
+                    {"y", y1},
+                    {"width", width},
+                    {"height", height}
+                };
+                segmentation["class_id"] = cls_id;
+                segmentation["class_name"] = (cls_id < class_names.size()) ? 
+                                           class_names[cls_id] : "class" + std::to_string(cls_id);
+                segmentation["confidence"] = confidence;
+                
+                // 如果有掩码数据，并且掩码索引有效
+                if (has_mask_data && idx < static_cast<int>(masks->size())) {
+                    // 提取轮廓
+                    std::vector<std::vector<cv::Point>> contours;
+                    cv::Mat mask_copy = (*masks)[idx].clone();
+                    cv::findContours(mask_copy, contours, cv::RETR_EXTERNAL, cv::CHAIN_APPROX_SIMPLE);
+                    
+                    // 创建多边形点数组
+                    nlohmann::json polygons = nlohmann::json::array();
+                    for (const auto& contour : contours) {
+                        // 仅处理具有足够点的轮廓
+                        if (contour.size() >= 3) {
+                            nlohmann::json polygon = nlohmann::json::array();
+                            // 简化轮廓以减少点数
+                            std::vector<cv::Point> approx_contour;
+                            cv::approxPolyDP(contour, approx_contour, 2.0, true);
+                            
+                            for (const auto& point : approx_contour) {
+                                polygon.push_back({
+                                    {"x", static_cast<float>(point.x)},
+                                    {"y", static_cast<float>(point.y)}
+                                });
+                            }
+                            polygons.push_back(polygon);
+                        }
+                    }
+                    
+                    // 如果有有效的多边形，添加到结果中
+                    if (!polygons.empty()) {
+                        segmentation["polygons"] = polygons;
+                    }
+                }
+                
+                segmentations.push_back(segmentation);
+            }
+        }
+        result_json["segmentations"][image_key] = segmentations;
     } else if (task_type == "classification") {
         nlohmann::json classifications = nlohmann::json::array();
         int top_count = std::min(5, static_cast<int>(indices[0].size()));

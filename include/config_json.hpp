@@ -30,5 +30,6 @@ public:
                           const int x_shift,
                           const int y_shift,
                           InferenceResult& result,
-                          const std::string& image_name);
+                          const std::string& image_name,
+                          const std::vector<cv::Mat>* masks = nullptr);
 };
