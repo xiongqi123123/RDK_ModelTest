@@ -2060,59 +2060,69 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLOV8() {
         cv::exp(-instance_mask_low_res, sigmoid_mask);
         sigmoid_mask = 1.0 / (1.0 + sigmoid_mask);
 
-        // 6. 将掩码裁剪到边界框内 (低分辨率 H/4, W/4)
-        float scale_h_proto = (float)proto_h / input_h_;
-        float scale_w_proto = (float)proto_w / input_w_;
-        int low_res_x1 = std::max(0, static_cast<int>(std::floor(bbox.x * scale_w_proto)));
-        int low_res_y1 = std::max(0, static_cast<int>(std::floor(bbox.y * scale_h_proto)));
-        int low_res_x2 = std::min(proto_w, static_cast<int>(std::ceil((bbox.x + bbox.width) * scale_w_proto)));
-        int low_res_y2 = std::min(proto_h, static_cast<int>(std::ceil((bbox.y + bbox.height) * scale_h_proto)));
-        cv::Mat cropped_mask_low_res = cv::Mat::zeros(proto_h, proto_w, CV_32F);
-        if (low_res_x1 < low_res_x2 && low_res_y1 < low_res_y2) {
-            sigmoid_mask(cv::Rect(low_res_x1, low_res_y1, low_res_x2 - low_res_x1, low_res_y2 - low_res_y1))
-                .copyTo(cropped_mask_low_res(cv::Rect(low_res_x1, low_res_y1, low_res_x2 - low_res_x1, low_res_y2 - low_res_y1)));
-        }
+        // 6. 将完整的 sigmoid 掩码上采样到输入尺寸 (input_h_ x input_w_)
+        cv::Mat resized_sigmoid_mask;
+        cv::resize(sigmoid_mask, resized_sigmoid_mask, cv::Size(input_w_, input_h_), 0, 0, cv::INTER_LINEAR);
 
-        // 7. 上采样掩码到输入尺寸 (input_h_ x input_w_)
-        cv::Mat final_mask_input_size; // Declaration
-        cv::resize(cropped_mask_low_res, final_mask_input_size, cv::Size(input_w_, input_h_), 0, 0, cv::INTER_LINEAR);
+        // 7. 阈值化得到二值掩码
+        cv::Mat binary_mask_input_size;
+        cv::threshold(resized_sigmoid_mask, binary_mask_input_size, 0.5, 1.0, cv::THRESH_BINARY);
 
-        // 8. 阈值化得到二值掩码
-        cv::Mat binary_mask_input_size; // Declaration
-        cv::threshold(final_mask_input_size, binary_mask_input_size, 0.5, 1.0, cv::THRESH_BINARY);
-
-        // 9. 将掩码裁剪/调整到原始图像尺寸的对应区域
+        // 8. 计算原始图像中的 ROI 区域
         float original_x1 = (bbox.x - x_shift_) / x_scale_;
         float original_y1 = (bbox.y - y_shift_) / y_scale_;
         float original_width = bbox.width / x_scale_;
         float original_height = bbox.height / y_scale_;
-        int orig_img_w = input_img_.cols; // Declaration
-        int orig_img_h = input_img_.rows; // Declaration
+        int orig_img_w = input_img_.cols;
+        int orig_img_h = input_img_.rows;
         original_x1 = std::max(0.0f, std::min((float)orig_img_w - 1, original_x1));
         original_y1 = std::max(0.0f, std::min((float)orig_img_h - 1, original_y1));
         original_width = std::max(1.0f, std::min((float)orig_img_w - original_x1, original_width));
         original_height = std::max(1.0f, std::min((float)orig_img_h - original_y1, original_height));
-        cv::Rect original_roi(static_cast<int>(original_x1), // Declaration
+        cv::Rect original_roi(static_cast<int>(original_x1),
                               static_cast<int>(original_y1),
                               static_cast<int>(original_width),
                               static_cast<int>(original_height));
 
+        // 9. 将二值掩码调整到原始 ROI 尺寸并放置到最终掩码中
         cv::Mat final_mask_original_size = cv::Mat::zeros(orig_img_h, orig_img_w, CV_8UC1);
         cv::Mat resized_binary_mask;
-        if (!binary_mask_input_size.empty()) {
-             cv::resize(binary_mask_input_size, resized_binary_mask, original_roi.size(), 0, 0, cv::INTER_NEAREST);
-             resized_binary_mask.convertTo(resized_binary_mask, CV_8UC1, 255);
-             if (original_roi.x >= 0 && original_roi.y >= 0 &&
-                 original_roi.width > 0 && original_roi.height > 0 &&
-                 original_roi.x + original_roi.width <= final_mask_original_size.cols &&
-                 original_roi.y + original_roi.height <= final_mask_original_size.rows)
-             {
-                 resized_binary_mask.copyTo(final_mask_original_size(original_roi));
+        if (!binary_mask_input_size.empty() && binary_mask_input_size.rows > 0 && binary_mask_input_size.cols > 0) {
+             // 只调整 ROI 部分的二值掩码
+             // 首先，我们需要从 binary_mask_input_size 中提取对应于 bbox 的区域
+             // 注意：这里的 bbox 仍然是相对于 input_size 的坐标
+             int input_roi_x = std::max(0, static_cast<int>(bbox.x));
+             int input_roi_y = std::max(0, static_cast<int>(bbox.y));
+             int input_roi_w = std::min(input_w_ - input_roi_x, static_cast<int>(bbox.width));
+             int input_roi_h = std::min(input_h_ - input_roi_y, static_cast<int>(bbox.height));
+
+             if (input_roi_w > 0 && input_roi_h > 0) {
+                 cv::Mat binary_mask_roi_input = binary_mask_input_size(cv::Rect(input_roi_x, input_roi_y, input_roi_w, input_roi_h));
+
+                 // 检查提取的 ROI 是否有效
+                 if (!binary_mask_roi_input.empty() && binary_mask_roi_input.rows > 0 && binary_mask_roi_input.cols > 0) {
+                     // 将提取的 ROI 调整到原始图像 ROI 尺寸
+                     cv::resize(binary_mask_roi_input, resized_binary_mask, original_roi.size(), 0, 0, cv::INTER_NEAREST);
+                     resized_binary_mask.convertTo(resized_binary_mask, CV_8UC1, 255);
+
+                     // 确保目标 ROI 在最终掩码范围内
+                     if (original_roi.x >= 0 && original_roi.y >= 0 &&
+                         original_roi.width > 0 && original_roi.height > 0 &&
+                         original_roi.x + original_roi.width <= final_mask_original_size.cols &&
+                         original_roi.y + original_roi.height <= final_mask_original_size.rows)
+                     {
+                         resized_binary_mask.copyTo(final_mask_original_size(original_roi));
+                     } else {
+                          std::cerr << "Warning: Invalid calculated original ROI for mask placement. ROI: " << original_roi << std::endl;
+                     }
+                 } else {
+                     std::cerr << "Warning: Extracted binary_mask_roi_input is empty or invalid. Input ROI: " << cv::Rect(input_roi_x, input_roi_y, input_roi_w, input_roi_h) << std::endl;
+                 }
              } else {
-                  std::cerr << "Warning: Invalid ROI calculated for mask placement. ROI: " << original_roi << std::endl;
+                  std::cerr << "Warning: Invalid input ROI calculated. Input ROI: " << cv::Rect(input_roi_x, input_roi_y, input_roi_w, input_roi_h) << std::endl;
              }
          } else {
-              std::cerr << "Warning: binary_mask_input_size is empty, cannot resize." << std::endl;
+              std::cerr << "Warning: binary_mask_input_size is empty or has invalid dimensions, cannot resize. Size: [" << binary_mask_input_size.cols << "x" << binary_mask_input_size.rows << "]" << std::endl;
          }
         // --- 结束掩码生成 ---
 
