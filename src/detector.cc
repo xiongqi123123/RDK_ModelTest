@@ -824,7 +824,7 @@ void BPU_Detect::Model_Draw(){
     }
     else if(task_type_ == "segmentation" || model_type_ == YOLOV8_SEG){ // <--- 处理分割任务
         output_img_ = input_img_.clone();
-
+        
         bool has_results = false;
         for (size_t cls_id = 0; cls_id < indices_.size(); ++cls_id) { // indices_ size is classes_num_
             if (!indices_[cls_id].empty()) {
@@ -895,7 +895,7 @@ void BPU_Detect::Model_Draw(){
                                             color, line_size_);
 
                  std::string label = class_names_[cls_id] + ": " + std::to_string(static_cast<int>(score * 100)) + "%";
-                 int baseline = 0;
+                int baseline = 0;
                  cv::Size text_size = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, font_size_, font_thickness_, &baseline);
 
                  // 确保标签绘制在图像内
@@ -922,14 +922,14 @@ void BPU_Detect::Model_Draw(){
                  }
                  if (bg_x1 >= bg_x2 || bg_y1 >= bg_y2) continue; // Skip if rect is invalid
 
-                 cv::rectangle(output_img_,
+                cv::rectangle(output_img_, 
                                cv::Point(bg_x1, bg_y1),
                                cv::Point(bg_x2, bg_y2),
-                               color, -1);
-                 cv::putText(output_img_, label,
+                             color, -1);
+                cv::putText(output_img_, label, 
                              cv::Point(bg_x1, label_y - baseline), // Use bg_x1 for text start
-                             cv::FONT_HERSHEY_SIMPLEX, font_size_,
-                             cv::Scalar(255, 255, 255), font_thickness_);
+                           cv::FONT_HERSHEY_SIMPLEX, font_size_, 
+                           cv::Scalar(255, 255, 255), font_thickness_);
 
              }
         }
@@ -1017,6 +1017,59 @@ void BPU_Detect::Model_Print() const {
     }
     else if(task_type_ == "segmentation"){
         // TODO: 打印分割结果
+        std::cout << "\n============ Segmentation Results ============" << std::endl;
+        
+        // 计算总检测实例数
+        int total_instances = 0;
+        for (int cls_id = 0; cls_id < classes_num_; ++cls_id) {
+            total_instances += indices_[cls_id].size();
+        }
+        
+        // 打印总检测实例数和总掩码数
+        std::cout << "Total instances detected: " << total_instances 
+                 << " (Total masks generated: " << masks_.size() << ")" << std::endl;
+        
+        // 按类别打印详细信息
+        for (int cls_id = 0; cls_id < classes_num_; ++cls_id) {
+            if (!indices_[cls_id].empty()) {
+                std::string class_name = (cls_id < static_cast<int>(class_names_.size())) ? 
+                                     class_names_[cls_id] : "class" + std::to_string(cls_id);
+                
+                std::cout << "\nClass: " << class_name << " (ID: " << cls_id << ")" << std::endl;
+                std::cout << "  Instances: " << indices_[cls_id].size() << std::endl;
+                std::cout << "  Details:" << std::endl;
+                
+                for(size_t i = 0; i < indices_[cls_id].size(); i++) {
+                    int idx = indices_[cls_id][i];
+                    // 计算原始图像坐标系中的边界框
+                    float x1 = (bboxes_[cls_id][idx].x - x_shift_) / x_scale_;
+                    float y1 = (bboxes_[cls_id][idx].y - y_shift_) / y_scale_;
+                    float x2 = x1 + (bboxes_[cls_id][idx].width) / x_scale_;
+                    float y2 = y1 + (bboxes_[cls_id][idx].height) / y_scale_;
+                    float score = scores_[cls_id][idx];
+                    
+                    // 获取掩码索引（在indices_中存储的是masks_的索引）
+                    int mask_idx = indices_[cls_id][i];
+                    
+                    // 计算掩码中非零像素的数量（即掩码面积）
+                    int mask_area = 0;
+                    if (mask_idx >= 0 && mask_idx < static_cast<int>(masks_.size())) {
+                        mask_area = cv::countNonZero(masks_[mask_idx]);
+                    }
+                    
+                    // 打印每个实例的详细信息
+                    std::cout << "  Instance " << i + 1 << ":" << std::endl;
+                    std::cout << "    Position: (" << std::fixed << std::setprecision(1) 
+                             << x1 << ", " << y1 << ") to (" << x2 << ", " << y2 << ")" << std::endl;
+                    std::cout << "    Size: " << std::fixed << std::setprecision(1) 
+                             << (x2 - x1) << " x " << (y2 - y1) << " pixels" << std::endl;
+                    std::cout << "    Mask area: " << mask_area << " pixels" << std::endl;
+                    std::cout << "    Confidence: " << std::fixed << std::setprecision(2) 
+                             << score * 100 << "%" << std::endl;
+                }
+            }
+        }
+        std::cout << "========================================\n" << std::endl;
     }
     else if(task_type_ == "classification"){
         // 打印分类结果
@@ -1983,6 +2036,7 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLOV8() {
               nms_bboxes_cv.push_back(cv::Rect(x, y, width, height));
               nms_scores_filtered.push_back(decoded_scores_all[idx]);
               original_indices_map.push_back(idx); 
+          } // <-- 添加缺失的右花括号，结束 for 循环
 
          if (!nms_bboxes_cv.empty()){
             cv::dnn::NMSBoxes(nms_bboxes_cv, nms_scores_filtered, score_threshold_, nms_threshold_, nms_indices_output);
@@ -2133,7 +2187,7 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLOV8() {
         masks_.push_back(final_mask_original_size); 
 
         final_bboxes.push_back(bbox); 
-        final_scores.push_back(score);
+        final_scores.push_back(decoded_scores_all[original_idx]); // <-- 修复未定义变量 score
         final_class_ids.push_back(cls_id);
         final_mask_indices.push_back(masks_.size() - 1); 
     }
