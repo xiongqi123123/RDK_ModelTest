@@ -38,9 +38,14 @@ ModelType BPU_Detect::DetermineModelType(const std::string& model_name) {
     
     // 判断是否包含yolo11关键字
     if (name_lower.find("yolo11") != std::string::npos) {
-        std::cout << "DetermineModelType: YOLO11" << std::endl;
-        return YOLO11;
-    } 
+        if (name_lower.find("seg") != std::string::npos) {
+            std::cout << "DetermineModelType: YOLO11-SEG" << std::endl;
+            return YOLO11_SEG;
+        } else {
+            std::cout << "DetermineModelType: YOLO11" << std::endl;
+            return YOLO11;
+        }
+    }   
     // 判断是否包含yolov8关键字
     else if (name_lower.find("yolov8") != std::string::npos) {
         if (name_lower.find("seg") != std::string::npos) {
@@ -115,10 +120,13 @@ void BPU_Detect::CalculateFeatureMapSizes(int input_height, int input_width) {
     W_16_ = input_width / 16;
     H_32_ = input_height / 32;
     W_32_ = input_width / 32;
+    H_4_ = input_height / 4;  // 用于分割任务的特征图尺寸
+    W_4_ = input_width / 4;   // 用于分割任务的特征图尺寸
     std::cout << "Calculated feature map sizes:" << std::endl;
     std::cout << "Small (1/8):  " << H_8_ << "x" << W_8_ << std::endl;
     std::cout << "Medium (1/16): " << H_16_ << "x" << W_16_ << std::endl;
     std::cout << "Large (1/32):  " << H_32_ << "x" << W_32_ << std::endl;
+    std::cout << "Segmentation (1/4): " << H_4_ << "x" << W_4_ << std::endl;
 }
 
 
@@ -289,7 +297,7 @@ bool BPU_Detect::Model_Output_Order()
             {H_8_,  W_8_,  32},           // S-MCE
             {H_16_, W_16_, 32},           // M-MCE
             {H_32_, W_32_, 32},           // L-MCE
-            {input_h_ / 4, input_w_ / 4, 32} // Proto (注意：这里使用 H/4, W/4)
+            {input_h_ / 4, input_w_ / 4, 32} // Proto 
         };
 
         // 遍历每个期望的输出
@@ -351,6 +359,89 @@ bool BPU_Detect::Model_Output_Order()
             std::cout << "=====================================================\n" << std::endl;
         } else {
             std::cout << "YOLOv8-SEG output order check failed (sum=" << sum << ", duplicate=" << duplicate << "), using default order" << std::endl;
+            for (int i = 0; i < 10; i++) {
+                output_order_[i] = i;
+            }
+        }
+    }
+    else if (model_type_ == YOLO11_SEG) {
+        // 初始化默认顺序
+        for (int i = 0; i < 10; i++) {
+            output_order_[i] = i;
+        }
+        
+        // 定义YOLO11-SEG期望的输出特征图属性
+        int32_t order_we_want[10][3] = {
+            {H_8_, W_8_, classes_num_},     // output[order[0]]: (1, H/8, W/8, CLASSES_NUM) - S-cls
+            {H_8_, W_8_, 4 * REG},          // output[order[1]]: (1, H/8, W/8, 4*REG) - S-box
+            {H_8_, W_8_, MCES_},            // output[order[2]]: (1, H/8, W/8, MCES) - S-mce
+            {H_16_, W_16_, classes_num_},   // output[order[3]]: (1, H/16, W/16, CLASSES_NUM) - M-cls
+            {H_16_, W_16_, 4 * REG},        // output[order[4]]: (1, H/16, W/16, 4*REG) - M-box
+            {H_16_, W_16_, MCES_},          // output[order[5]]: (1, H/16, W/16, MCES) - M-mce
+            {H_32_, W_32_, classes_num_},   // output[order[6]]: (1, H/32, W/32, CLASSES_NUM) - L-cls
+            {H_32_, W_32_, 4 * REG},        // output[order[7]]: (1, H/32, W/32, 4*REG) - L-box
+            {H_32_, W_32_, MCES_},          // output[order[8]]: (1, H/32, W/32, MCES) - L-mce
+            {H_4_, W_4_, MCES_}             // output[order[9]]: (1, H/4, W/4, MCES) - Proto
+        };
+
+        // 遍历每个期望的输出
+        for (int i = 0; i < 10; i++) {
+            bool found = false;
+            for (int j = 0; j < 10; j++) {
+                hbDNNTensorProperties output_properties;
+                RDK_CHECK_SUCCESS(
+                    hbDNNGetOutputTensorProperties(&output_properties, dnn_handle_, j),
+                    "Get output tensor properties failed");
+                
+                // 检查维度是否为4维
+                if (output_properties.validShape.numDimensions != 4) {
+                    continue; // 跳过非4维张量
+                }
+
+                int32_t h = output_properties.validShape.dimensionSize[1];
+                int32_t w = output_properties.validShape.dimensionSize[2];
+                int32_t c = output_properties.validShape.dimensionSize[3];
+
+                if (h == order_we_want[i][0] && w == order_we_want[i][1] && c == order_we_want[i][2]) {
+                    output_order_[i] = j;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                std::cerr << "Warning: Could not find matching output tensor for expected shape: ("
+                          << order_we_want[i][0] << ", " << order_we_want[i][1] << ", " << order_we_want[i][2] << ")" << std::endl;
+            }
+        }
+
+        // 检查输出顺序映射是否有效 (检查是否有重复的索引)
+        std::vector<int> check_vec(output_order_, output_order_ + 10);
+        std::sort(check_vec.begin(), check_vec.end());
+        bool duplicate = false;
+        for (size_t k = 0; k < check_vec.size() - 1; ++k) {
+            if (check_vec[k] == check_vec[k+1]) {
+                duplicate = true;
+                break;
+            }
+        }
+        int sum = 0;
+        for(int val : check_vec) sum += val;
+
+        if (!duplicate && sum == (0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9)) {
+            std::cout << "\n============ Output Order Mapping for YOLO11-SEG ============" << std::endl;
+            std::cout << "S-cls (1/" << 8  << "): output[" << output_order_[0] << "]" << std::endl;
+            std::cout << "S-box (1/" << 8  << "): output[" << output_order_[1] << "]" << std::endl;
+            std::cout << "S-mce (1/" << 8  << "): output[" << output_order_[2] << "]" << std::endl;
+            std::cout << "M-cls (1/" << 16 << "): output[" << output_order_[3] << "]" << std::endl;
+            std::cout << "M-box (1/" << 16 << "): output[" << output_order_[4] << "]" << std::endl;
+            std::cout << "M-mce (1/" << 16 << "): output[" << output_order_[5] << "]" << std::endl;
+            std::cout << "L-cls (1/" << 32 << "): output[" << output_order_[6] << "]" << std::endl;
+            std::cout << "L-box (1/" << 32 << "): output[" << output_order_[7] << "]" << std::endl;
+            std::cout << "L-mce (1/" << 32 << "): output[" << output_order_[8] << "]" << std::endl;
+            std::cout << "Proto (1/" << 4  << "): output[" << output_order_[9] << "]" << std::endl;
+            std::cout << "=====================================================\n" << std::endl;
+        } else {
+            std::cout << "YOLO11-SEG output order check failed (sum=" << sum << ", duplicate=" << duplicate << "), using default order" << std::endl;
             for (int i = 0; i < 10; i++) {
                 output_order_[i] = i;
             }
@@ -447,6 +538,9 @@ bool BPU_Detect::Model_Info_check()
         return false;
     } else if (model_type_ == YOLOV8_SEG && output_count_ != 10) {
         std::cout << "YOLOv8-SEG model should have 10 outputs, but actually has " << output_count_ << " outputs" << std::endl;
+        return false;
+    } else if (model_type_ == YOLO11_SEG && output_count_ != 10) {
+        std::cout << "YOLO11-SEG model should have 10 outputs, but actually has " << output_count_ << " outputs" << std::endl;
         return false;
     }
 
@@ -772,15 +866,22 @@ bool BPU_Detect::Model_Postprocess()
                 return false;
             }
         }
-        }
+    }
     else if(task_type_ == "segmentation") { // <--- 明确处理分割任务
-        if(model_type_ == YOLOV8_SEG){ // Only run if model is YOLOV8_SEG
-        if(!Model_Segmentation_Postprocess_YOLOV8()){
-            std::cout << "Segmentation postprocess failed" << std::endl;
+        if(model_type_ == YOLOV8_SEG){ 
+            if(!Model_Segmentation_Postprocess_YOLOV8()){
+                std::cout << "YOLOV8 Segmentation postprocess failed" << std::endl;
+            return false;
+            }
+        }
+        else if(model_type_ == YOLO11_SEG){
+            if(!Model_Segmentation_Postprocess_YOLO11()){
+                std::cout << "YOLO11 Segmentation postprocess failed" << std::endl;
                 return false;
             }
-        } else {
-             std::cout << "Error: Segmentation task specified, but model is not YOLOV8_SEG." << std::endl;
+        }
+        else {
+             std::cout << "Error: Segmentation task specified, but model is not YOLOV8_SEG or YOLO11_SEG." << std::endl;
             return false;
         }
     }
@@ -2145,7 +2246,6 @@ void BPU_Detect::Model_Process_FeatureMap_YOLOV8_SEG(
     int mce_idx = mce_indices[scale_idx];
 
     float conf_thres_raw = -log(1 / score_threshold_ - 1);
-    const int MCE_CHANNELS = 32; 
     std::vector<float> dfl_weights(REG);
     for(int i=0; i<REG; ++i) dfl_weights[i] = static_cast<float>(i);
 
@@ -2183,7 +2283,7 @@ void BPU_Detect::Model_Process_FeatureMap_YOLOV8_SEG(
 
     auto* mce_raw = reinterpret_cast<int32_t*>(mce_tensor.sysMem[0].virAddr);
     auto* mce_scale_ptr = reinterpret_cast<float*>(mce_tensor.properties.scale.scaleData);
-    std::vector<float> mce_scales(MCE_CHANNELS, (mce_scale_ptr != nullptr) ? mce_scale_ptr[0] : 1.0f);
+    std::vector<float> mce_scales(MCES_, (mce_scale_ptr != nullptr) ? mce_scale_ptr[0] : 1.0f);
 
     int reg_channels = 4 * REG; 
 
@@ -2193,7 +2293,7 @@ void BPU_Detect::Model_Process_FeatureMap_YOLOV8_SEG(
             int current_offset = h * feature_w + w;
             float* cur_cls_raw = cls_raw + current_offset * classes_num_;
             int32_t* cur_reg_raw = reg_raw + current_offset * reg_channels;
-            int32_t* cur_mce_raw = mce_raw + current_offset * MCE_CHANNELS;
+            int32_t* cur_mce_raw = mce_raw + current_offset * MCES_;
 
             // 找到分数最大的类别
             int cls_id = 0;
@@ -2250,8 +2350,8 @@ void BPU_Detect::Model_Process_FeatureMap_YOLOV8_SEG(
             float y2 = (h + 0.5f + ltrb[3]) * stride;
 
             // 反量化掩码系数
-            std::vector<float> current_mce(MCE_CHANNELS);
-            for (int k = 0; k < MCE_CHANNELS; ++k) {
+            std::vector<float> current_mce(MCES_);
+            for (int k = 0; k < MCES_; ++k) {
                 current_mce[k] = float(cur_mce_raw[k]) * mce_scales[k];
             }
 
@@ -2330,9 +2430,6 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLOV8() {
     }
 
     // 3. 处理 NMS 后的结果并生成掩码
-    const int MCE_CHANNELS = 32; 
-
-    // --- 临时变量存储最终结果 ---
     std::vector<cv::Rect2d> final_bboxes;
     std::vector<float> final_scores;
     std::vector<int> final_class_ids;
@@ -2352,20 +2449,20 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLOV8() {
     hbSysFlushMem(&proto_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
     if (proto_tensor.properties.validShape.numDimensions != 4 ||
         proto_tensor.properties.validShape.dimensionSize[0] != 1 ||
-        proto_tensor.properties.validShape.dimensionSize[3] != MCE_CHANNELS) {
+        proto_tensor.properties.validShape.dimensionSize[3] != MCES_) {
         std::cerr << "Error: Invalid proto tensor shape. Dimensions: "
                   << proto_tensor.properties.validShape.numDimensions
                   << ", Size: (" << proto_tensor.properties.validShape.dimensionSize[0] << ","
                   << proto_tensor.properties.validShape.dimensionSize[1] << ","
                   << proto_tensor.properties.validShape.dimensionSize[2] << ","
                   << proto_tensor.properties.validShape.dimensionSize[3] << ")"
-                  << ", Expected Channels: " << MCE_CHANNELS << std::endl;
+                  << ", Expected Channels: " << MCES_ << std::endl;
         return false;
     }
     int proto_h = proto_tensor.properties.validShape.dimensionSize[1]; 
     int proto_w = proto_tensor.properties.validShape.dimensionSize[2]; 
     auto* proto_data = reinterpret_cast<float*>(proto_tensor.sysMem[0].virAddr);
-    cv::Mat proto_mat(proto_h * proto_w, MCE_CHANNELS, CV_32F, proto_data);
+    cv::Mat proto_mat(proto_h * proto_w, MCES_, CV_32F, proto_data);
 
 
     std::cout << "Processing NMS results and generating masks..." << std::endl;
@@ -2390,7 +2487,7 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLOV8() {
 
         // --- 步骤 4-9: 生成实例掩码 final_mask_original_size ---
         // 4. 生成实例掩码 (低分辨率 proto_h x proto_w)
-        cv::Mat mce_mat(1, MCE_CHANNELS, CV_32F, mce.data()); 
+        cv::Mat mce_mat(1, MCES_, CV_32F, mce.data()); 
         cv::Mat instance_mask_flat = proto_mat * mce_mat.t();
         cv::Mat instance_mask_low_res = instance_mask_flat.reshape(1, proto_h);
 
@@ -2493,3 +2590,383 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLOV8() {
     return true;
 }
 
+// YOLO11-Seg 特征图处理函数
+void BPU_Detect::Model_Process_FeatureMap_YOLO11_SEG(
+    int scale_idx,
+    std::vector<cv::Rect2d>& decoded_bboxes_all,
+    std::vector<float>& decoded_scores_all,
+    std::vector<int>& decoded_classes_all,
+    std::vector<std::vector<float>>& decoded_mces_all)
+{
+    // 小、中、大特征图的索引和尺度
+    int feature_indices[3][3] = {
+        {0, 1, 2},  // 小目标特征图 - 类别、边框、掩码系数
+        {3, 4, 5},  // 中目标特征图 - 类别、边框、掩码系数
+        {6, 7, 8}   // 大目标特征图 - 类别、边框、掩码系数
+    };
+    float strides[3] = {8.0f, 16.0f, 32.0f};
+    int feature_hs[3] = {H_8_, H_16_, H_32_};
+    int feature_ws[3] = {W_8_, W_16_, W_32_};
+
+    int cls_idx = output_order_[feature_indices[scale_idx][0]]; // 类别输出
+    int box_idx = output_order_[feature_indices[scale_idx][1]]; // 边框输出
+    int mce_idx = output_order_[feature_indices[scale_idx][2]]; // 掩码系数输出
+
+    float stride = strides[scale_idx];
+    int feature_h = feature_hs[scale_idx];
+    int feature_w = feature_ws[scale_idx];
+    float conf_thres_raw = -log(1 / score_threshold_ - 1); // sigmoid反函数阈值
+
+    // 检查索引有效性
+    if (cls_idx < 0 || box_idx < 0 || mce_idx < 0 ||
+        cls_idx >= output_count_ || box_idx >= output_count_ || mce_idx >= output_count_) {
+        std::cerr << "Error: Invalid output tensor index for YOLO11-Seg scale " << stride << std::endl;
+        return;
+    }
+
+    // 获取对应的输出张量
+    hbDNNTensor& cls_tensor = output_tensors_[cls_idx];
+    hbDNNTensor& box_tensor = output_tensors_[box_idx];
+    hbDNNTensor& mce_tensor = output_tensors_[mce_idx];
+
+    // 检查量化类型
+    if (cls_tensor.properties.quantiType != NONE) {
+        std::cerr << "Warning: YOLO11-Seg class output quantization type should be NONE!" << std::endl;
+    }
+    if (box_tensor.properties.quantiType != SCALE) {
+        std::cerr << "Warning: YOLO11-Seg bbox output quantization type should be SCALE!" << std::endl;
+    }
+    if (mce_tensor.properties.quantiType != SCALE) {
+        std::cerr << "Warning: YOLO11-Seg mask coefficient output quantization type should be SCALE!" << std::endl;
+    }
+
+    // 刷新内存
+    hbSysFlushMem(&cls_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
+    hbSysFlushMem(&box_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
+    hbSysFlushMem(&mce_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
+
+    // 获取数据指针和量化尺度
+    auto* cls_raw = reinterpret_cast<float*>(cls_tensor.sysMem[0].virAddr);
+    auto* box_raw = reinterpret_cast<int32_t*>(box_tensor.sysMem[0].virAddr);
+    auto* box_scale_ptr = reinterpret_cast<float*>(box_tensor.properties.scale.scaleData);
+
+    auto* mce_raw = reinterpret_cast<int32_t*>(mce_tensor.sysMem[0].virAddr);
+    auto* mce_scale_ptr = reinterpret_cast<float*>(mce_tensor.properties.scale.scaleData);
+
+    // 遍历特征图
+    for (int h = 0; h < feature_h; h++) {
+        for (int w = 0; w < feature_w; w++) {
+            // 获取当前位置的特征向量
+            auto* cur_cls_raw = cls_raw + (h * feature_w + w) * classes_num_;
+            auto* cur_box_raw = box_raw + (h * feature_w + w) * (4 * REG);
+            auto* cur_mce_raw = mce_raw + (h * feature_w + w) * MCES_;
+
+            // 找到分数最大的类别
+            int cls_id = 0;
+            for (int i = 1; i < classes_num_; i++) {
+                if (cur_cls_raw[i] > cur_cls_raw[cls_id]) {
+                    cls_id = i;
+                }
+            }
+            if (cur_cls_raw[cls_id] < conf_thres_raw) {
+                continue;
+            }
+
+            // 计算置信度 (Sigmoid)
+            float score = 1.0f / (1.0f + std::exp(-cur_cls_raw[cls_id]));
+
+            // DFL解码边界框
+            float ltrb[4] = {0.0f}; // left, top, right, bottom
+            float sum, dfl;
+            for (int i = 0; i < 4; i++) {
+                ltrb[i] = 0.0f;
+                sum = 0.0f;
+                for (int j = 0; j < REG; j++) {
+                    int index_id = REG * i + j;
+                    dfl = std::exp(float(cur_box_raw[index_id]) * box_scale_ptr[index_id]);
+                    ltrb[i] += dfl * j;
+                    sum += dfl;
+                }
+                ltrb[i] /= sum;
+            }
+
+            // 剔除不合格的框
+            if (ltrb[2] + ltrb[0] <= 0 || ltrb[3] + ltrb[1] <= 0) {
+                continue;
+            }
+
+            // 计算bbox坐标
+            float x1 = (w + 0.5f - ltrb[0]) * stride;
+            float y1 = (h + 0.5f - ltrb[1]) * stride;
+            float x2 = (w + 0.5f + ltrb[2]) * stride;
+            float y2 = (h + 0.5f + ltrb[3]) * stride;
+
+            // 提取并反量化掩码系数
+            std::vector<float> mask_coeffs(MCES_);
+            for (int i = 0; i < MCES_; i++) {
+                mask_coeffs[i] = float(cur_mce_raw[i]) * mce_scale_ptr[i];
+            }
+
+            // 保存解码结果
+            decoded_bboxes_all.push_back(cv::Rect2d(x1, y1, x2 - x1, y2 - y1));
+            decoded_scores_all.push_back(score);
+            decoded_classes_all.push_back(cls_id);
+            decoded_mces_all.push_back(mask_coeffs);
+        }
+    }
+}
+
+bool BPU_Detect::Model_Segmentation_Postprocess_YOLO11() {
+    std::cout << "Starting YOLO11-Seg Segmentation Postprocess..." << std::endl;
+
+    bboxes_.clear();
+    scores_.clear();
+    indices_.clear(); 
+    masks_.clear();
+    mask_coeffs_.clear();
+
+    bboxes_.resize(classes_num_);
+    scores_.resize(classes_num_);
+    indices_.resize(classes_num_);
+
+    // 临时存储解码后的结果 (在 NMS 之前)
+    std::vector<cv::Rect2d> decoded_bboxes_all; // 模型输入尺寸的边界框
+    std::vector<float> decoded_scores_all;      // 置信度
+    std::vector<int> decoded_classes_all;       // 类别ID
+    std::vector<std::vector<float>> decoded_mces_all; // 每个框的掩码系数
+
+    std::cout << "Processing feature maps for YOLO11-Seg..." << std::endl;
+    for (int scale_idx = 0; scale_idx < 3; ++scale_idx) {
+        Model_Process_FeatureMap_YOLO11_SEG(
+            scale_idx,
+            decoded_bboxes_all,
+            decoded_scores_all,
+            decoded_classes_all,
+            decoded_mces_all
+        );
+    }
+    std::cout << "Feature map processing done. Total detections before NMS: " << decoded_bboxes_all.size() << std::endl;
+
+    // NMS 
+    std::vector<int> nms_indices_output; 
+    std::vector<int> original_indices_map; 
+    if (!decoded_bboxes_all.empty()) {
+        std::vector<cv::Rect> nms_bboxes_cv;
+        std::vector<float> nms_scores_filtered;
+
+        for(size_t idx = 0; idx < decoded_bboxes_all.size(); ++idx) {
+            const auto& box = decoded_bboxes_all[idx];
+            int x = std::max(0.0, box.x);
+            int y = std::max(0.0, box.y);
+            int width = std::max(1.0, box.width);
+            int height = std::max(1.0, box.height);
+            // 确保边界框不超出图像
+            if (x + width > input_w_) width = input_w_ - x;
+            if (y + height > input_h_) height = input_h_ - y;
+            if (width <= 0 || height <= 0) continue;
+
+            nms_bboxes_cv.push_back(cv::Rect(x, y, width, height));
+            nms_scores_filtered.push_back(decoded_scores_all[idx]);
+            original_indices_map.push_back(idx); 
+        }
+
+        if (!nms_bboxes_cv.empty()){
+            cv::dnn::NMSBoxes(nms_bboxes_cv, nms_scores_filtered, score_threshold_, nms_threshold_, nms_indices_output);
+            std::cout << "NMS done. Detections after NMS: " << nms_indices_output.size() << std::endl;
+        } else {
+            std::cout << "No valid boxes remaining before NMS." << std::endl;
+        }
+    } else {
+        std::cout << "No detections before NMS." << std::endl;
+        return true;
+    }
+
+    // 临时变量存储最终结果
+    std::vector<cv::Rect2d> final_bboxes;
+    std::vector<float> final_scores;
+    std::vector<int> final_class_ids;
+    std::vector<int> final_mask_indices; // 存储对应 masks_ 的索引
+
+    // 获取原型掩码输出
+    int proto_idx = output_order_[9];
+    if (proto_idx < 0 || proto_idx >= output_count_) {
+        std::cerr << "Error: Invalid proto tensor index!" << std::endl;
+        return false;
+    }
+    
+    hbDNNTensor& proto_tensor = output_tensors_[proto_idx];
+    
+    // 检查原型掩码的量化类型
+    if (proto_tensor.properties.quantiType != SCALE) {
+        std::cerr << "Warning: Proto tensor quantization type is not SCALE (Type: "
+                << proto_tensor.properties.quantiType << "). Results might be incorrect." << std::endl;
+    }
+    
+    // 刷新内存
+    hbSysFlushMem(&proto_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
+    
+    // 检查原型掩码张量的维度
+    if (proto_tensor.properties.validShape.numDimensions != 4 ||
+        proto_tensor.properties.validShape.dimensionSize[0] != 1 ||
+        proto_tensor.properties.validShape.dimensionSize[3] != MCES_) {
+        std::cerr << "Error: Invalid proto tensor shape. Dimensions: "
+                  << proto_tensor.properties.validShape.numDimensions
+                  << ", Size: (" << proto_tensor.properties.validShape.dimensionSize[0] << ","
+                  << proto_tensor.properties.validShape.dimensionSize[1] << ","
+                  << proto_tensor.properties.validShape.dimensionSize[2] << ","
+                  << proto_tensor.properties.validShape.dimensionSize[3] << ")"
+                  << ", Expected Channels: " << MCES_ << std::endl;
+        return false;
+    }
+    
+    // 获取原型掩码的尺寸和数据
+    int proto_h = proto_tensor.properties.validShape.dimensionSize[1];
+    int proto_w = proto_tensor.properties.validShape.dimensionSize[2];
+    
+    // 验证原型掩码尺寸是否符合预期
+    if (proto_h != H_4_ || proto_w != W_4_) {
+        std::cerr << "Warning: Proto tensor dimensions (" << proto_h << "x" << proto_w 
+                  << ") do not match expected dimensions (" << H_4_ << "x" << W_4_ << ")" << std::endl;
+    }
+    
+    // 反量化原型掩码数据
+    auto* proto_data_raw = reinterpret_cast<int16_t*>(proto_tensor.sysMem[0].virAddr);
+    float proto_scale = proto_tensor.properties.scale.scaleData[0];
+    
+    // 创建存储反量化后的原型掩码的矩阵
+    std::vector<float> proto_data_dequant(proto_h * proto_w * MCES_);
+    for (int i = 0; i < proto_h * proto_w * MCES_; ++i) {
+        proto_data_dequant[i] = static_cast<float>(proto_data_raw[i]) * proto_scale;
+    }
+    // 创建存储反量化后的原型掩码的矩阵
+    cv::Mat proto_mat(proto_h * proto_w, MCES_, CV_32F, proto_data_dequant.data());
+
+    std::cout << "Processing NMS results and generating masks..." << std::endl;
+    // 遍历 NMS 后的索引并生成实例掩码
+    for (int filtered_idx : nms_indices_output) {
+        if (filtered_idx < 0 || filtered_idx >= static_cast<int>(original_indices_map.size())) {
+            std::cerr << "Error: Invalid index (" << filtered_idx << ") from NMSBoxes output. Max index: " 
+                      << original_indices_map.size() - 1 << std::endl;
+            continue;
+        }
+        
+        int original_idx = original_indices_map[filtered_idx];
+        
+        // 安全检查 original_idx
+        if (original_idx < 0 || original_idx >= static_cast<int>(decoded_bboxes_all.size())) {
+            std::cerr << "Error: Invalid original index (" << original_idx 
+                      << ") mapped from NMSBoxes. Max index: " << decoded_bboxes_all.size() - 1 << std::endl;
+            continue;
+        }
+
+        // 获取检测框相关数据
+        int cls_id = decoded_classes_all[original_idx];
+        cv::Rect2d bbox = decoded_bboxes_all[original_idx];
+        std::vector<float> mce = decoded_mces_all[original_idx];
+
+        // 生成低分辨率实例掩码
+        cv::Mat mce_mat(1, MCES_, CV_32F, mce.data());
+        cv::Mat instance_mask_flat = proto_mat * mce_mat.t();
+        cv::Mat instance_mask_low_res = instance_mask_flat.reshape(1, proto_h);
+
+        // 应用sigmoid激活函数
+        cv::Mat sigmoid_mask;
+        cv::exp(-instance_mask_low_res, sigmoid_mask);
+        sigmoid_mask = 1.0 / (1.0 + sigmoid_mask);
+
+        // 上采样到输入图像尺寸
+        cv::Mat resized_sigmoid_mask;
+        cv::resize(sigmoid_mask, resized_sigmoid_mask, cv::Size(input_w_, input_h_), 0, 0, cv::INTER_LINEAR);
+
+        // 二值化掩码(阈值为0.5)
+        cv::Mat binary_mask_input_size;
+        cv::threshold(resized_sigmoid_mask, binary_mask_input_size, 0.5, 1.0, cv::THRESH_BINARY);
+
+        // 计算原始图像中的ROI区域
+        float original_x1 = (bbox.x - x_shift_) / x_scale_;
+        float original_y1 = (bbox.y - y_shift_) / y_scale_;
+        float original_width = bbox.width / x_scale_;
+        float original_height = bbox.height / y_scale_;
+        int orig_img_w = input_img_.cols;
+        int orig_img_h = input_img_.rows;
+        
+        // 确保ROI在图像范围内
+        original_x1 = std::max(0.0f, std::min((float)orig_img_w - 1, original_x1));
+        original_y1 = std::max(0.0f, std::min((float)orig_img_h - 1, original_y1));
+        original_width = std::max(1.0f, std::min((float)orig_img_w - original_x1, original_width));
+        original_height = std::max(1.0f, std::min((float)orig_img_h - original_y1, original_height));
+        
+        cv::Rect original_roi(static_cast<int>(original_x1),
+                             static_cast<int>(original_y1),
+                             static_cast<int>(original_width),
+                             static_cast<int>(original_height));
+
+        // 将二值掩码调整到原始ROI尺寸并放置到最终掩码中
+        cv::Mat final_mask_original_size = cv::Mat::zeros(orig_img_h, orig_img_w, CV_8UC1);
+        cv::Mat resized_binary_mask;
+
+        if (!binary_mask_input_size.empty() && binary_mask_input_size.rows > 0 && binary_mask_input_size.cols > 0) {
+            int input_roi_x = std::max(0, static_cast<int>(bbox.x));
+            int input_roi_y = std::max(0, static_cast<int>(bbox.y));
+            int input_roi_w = std::min(binary_mask_input_size.cols - input_roi_x, static_cast<int>(bbox.width));
+            int input_roi_h = std::min(binary_mask_input_size.rows - input_roi_y, static_cast<int>(bbox.height));
+
+            if (input_roi_w > 0 && input_roi_h > 0) {
+                cv::Mat binary_mask_roi_input = binary_mask_input_size(cv::Rect(input_roi_x, input_roi_y, input_roi_w, input_roi_h));
+
+                if (!binary_mask_roi_input.empty() && binary_mask_roi_input.rows > 0 && binary_mask_roi_input.cols > 0) {
+                    cv::resize(binary_mask_roi_input, resized_binary_mask, original_roi.size(), 0, 0, cv::INTER_NEAREST);
+                    resized_binary_mask.convertTo(resized_binary_mask, CV_8UC1, 255);
+
+                    if (original_roi.x >= 0 && original_roi.y >= 0 &&
+                        original_roi.width > 0 && original_roi.height > 0 &&
+                        original_roi.x + original_roi.width <= final_mask_original_size.cols &&
+                        original_roi.y + original_roi.height <= final_mask_original_size.rows)
+                    {
+                        resized_binary_mask.copyTo(final_mask_original_size(original_roi));
+                    } else {
+                        std::cerr << "Warning: Invalid calculated original ROI for mask placement. ROI: " << original_roi
+                                  << ", Mask Size: " << final_mask_original_size.size() << std::endl;
+                    }
+                } else {
+                    std::cerr << "Warning: Extracted binary_mask_roi_input is empty or invalid. Input ROI Rect: "
+                              << cv::Rect(input_roi_x, input_roi_y, input_roi_w, input_roi_h) << std::endl;
+                }
+            } else {
+                std::cerr << "Warning: Invalid input ROI calculated (width or height <= 0). Input ROI Rect: "
+                          << cv::Rect(input_roi_x, input_roi_y, input_roi_w, input_roi_h) << std::endl;
+            }
+        } else {
+            std::cerr << "Warning: binary_mask_input_size is empty or has invalid dimensions, cannot extract ROI. Size: ["
+                      << binary_mask_input_size.cols << "x" << binary_mask_input_size.rows << "]" << std::endl;
+        }
+
+        // 保存结果
+        masks_.push_back(final_mask_original_size);
+
+        final_bboxes.push_back(bbox);
+        final_scores.push_back(decoded_scores_all[original_idx]);
+        final_class_ids.push_back(cls_id);
+        final_mask_indices.push_back(masks_.size() - 1);
+    }
+
+    // 按类别整理结果
+    for (auto& vec : bboxes_) vec.clear();
+    for (auto& vec : scores_) vec.clear();
+    for (auto& vec : indices_) vec.clear();
+
+    for (size_t k = 0; k < final_bboxes.size(); ++k) {
+        int cls_id = final_class_ids[k];
+        if (cls_id >= 0 && cls_id < classes_num_) {
+            bboxes_[cls_id].push_back(final_bboxes[k]);
+            scores_[cls_id].push_back(final_scores[k]);
+            indices_[cls_id].push_back(final_mask_indices[k]);
+        } else {
+            std::cerr << "Warning: Invalid class ID (" << cls_id << ") encountered after NMS. Skipping result." << std::endl;
+        }
+    }
+
+    std::cout << "YOLO11-Seg post-processing finished. Stored " << masks_.size() << " final masks." << std::endl;
+
+    return true;
+}

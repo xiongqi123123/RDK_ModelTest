@@ -7,7 +7,7 @@
 #include <algorithm>   // 算法库
 #include <chrono>      // 时间相关功能
 #include <iomanip>     // 输入输出格式控制
-
+#include <omp.h>
 // Thrid Party Librarys
 #include <opencv2/opencv.hpp>      // OpenCV主要头文件
 #include <opencv2/dnn/dnn.hpp>     // OpenCV深度学习模块
@@ -49,6 +49,7 @@ enum ModelType {
     YOLO11 = 1,   // YOLO11系列模型
     YOLOV8 = 2,   // YOLOv8系列模型
     YOLOV8_SEG = 3, // YOLOv8分割模型
+    YOLO11_SEG = 4, // YOLO11分割模型
     UNKNOWN = -1  // 未知模型类型
 };
 
@@ -114,6 +115,7 @@ class BPU_Detect{
         bool Model_Detection_Postprocess_YOLO11(); // YOLO11专用后处理
         bool Model_Detection_Postprocess_YOLOV8(); // YOLOv8专用后处理
         bool Model_Segmentation_Postprocess_YOLOV8(); // YOLOv8-Seg专用后处理
+        bool Model_Segmentation_Postprocess_YOLO11(); // YOLO11-Seg专用后处理
         void Model_Process_FeatureMap(hbDNNTensor& output_tensor, 
                                      int feature_h, 
                                      int feature_w, 
@@ -133,6 +135,12 @@ class BPU_Detect{
                                    std::vector<float>& decoded_scores_all,
                                    std::vector<int>& decoded_classes_all,
                                    std::vector<std::vector<float>>& decoded_mces_all); // YOLOv8-Seg专用特征图处理
+        void Model_Process_FeatureMap_YOLO11_SEG(
+                                   int scale_idx,
+                                   std::vector<cv::Rect2d>& decoded_bboxes_all,
+                                   std::vector<float>& decoded_scores_all,
+                                   std::vector<int>& decoded_classes_all,
+                                   std::vector<std::vector<float>>& decoded_mces_all); // YOLO11-Seg专用特征图处理
         bool Model_Classification_Postprocess();
         bool Model_Postprocess();
         void Model_Draw();
@@ -152,6 +160,8 @@ class BPU_Detect{
         int W_16_;   // 特征图宽度 - 中目标
         int H_32_;   // 特征图高度 - 大目标
         int W_32_;   // 特征图宽度 - 大目标
+        int H_4_;    // 特征图高度 - 分割
+        int W_4_;    // 特征图宽度 - 分割
 
         // 计算特征图尺寸的函数
 
@@ -188,7 +198,7 @@ class BPU_Detect{
 
         int input_h_;// 输入高度
         int input_w_;// 输入宽度
-        int output_order_[10]; // 输出顺序映射，YOLOv8-Seg有10个输出
+        int output_order_[10]; // 输出顺序映射，YOLOv8-Seg和YOLO11-Seg有10个输出
 
         float x_scale_;                          // X方向缩放比例
         float y_scale_;                          // Y方向缩放比例
@@ -213,12 +223,13 @@ class BPU_Detect{
         std::string label_path_;
         std::vector<BBoxInfo> gt_boxes_; // Ground truth boxes from label data
 
-        // 使用现有成员变量存储分割掩码数据
-        // bboxes_, scores_, indices_保持不变，用于检测结果
-        // 将分割掩码数据存储在这些额外的变量中
+        // 分割相关数据
         std::vector<cv::Mat> masks_; // 存储每个最终检测实例的二值掩码 (尺寸与原图相同)
         cv::Mat proto_;             // 存储原型掩码 (来自模型输出 H/4 x W/4 x 32)
         std::vector<std::vector<float>> mask_coeffs_; // 存储每个通过NMS的检测框的32个掩码系数
+        
+        // YOLO11-Seg/YOLO8-Seg的掩码系数数量，默认为32
+        const int MCES_ = 32;
         
 };
 
