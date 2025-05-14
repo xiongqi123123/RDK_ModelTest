@@ -62,6 +62,11 @@ ModelType BPU_Detect::DetermineModelType(const std::string& model_name) {
         std::cout << "DetermineModelType: YOLOV5" << std::endl;
         return YOLOV5;
     } 
+    // 判断是否包含fcn关键字 - 修改为更精确的匹配
+    else if (name_lower.find("fcn") != std::string::npos) {
+        std::cout << "DetermineModelType: FCN" << std::endl;
+        return FCN;
+    }
     else {
         std::cout << "DetermineModelType: UNKNOWN" << std::endl;
         return UNKNOWN;
@@ -280,174 +285,179 @@ bool BPU_Detect::Model_Output_Order()
             }
         }
     }
-    else if (model_type_ == YOLOV8_SEG) {
-        // 初始化默认顺序
-        for (int i = 0; i < 10; i++) {
-            output_order_[i] = i;
-        }
-        
-        // 定义期望的输出特征图属性
-        int32_t order_we_want[10][3] = {
-            {H_8_,  W_8_,  64},           // S-Reg
-            {H_16_, W_16_, 64},           // M-Reg
-            {H_32_, W_32_, 64},           // L-Reg
-            {H_8_,  W_8_,  classes_num_}, // S-Cls
-            {H_16_, W_16_, classes_num_}, // M-Cls
-            {H_32_, W_32_, classes_num_}, // L-Cls
-            {H_8_,  W_8_,  32},           // S-MCE
-            {H_16_, W_16_, 32},           // M-MCE
-            {H_32_, W_32_, 32},           // L-MCE
-            {input_h_ / 4, input_w_ / 4, 32} // Proto 
-        };
-
-        // 遍历每个期望的输出
-        for (int i = 0; i < 10; i++) {
-            bool found = false;
-            for (int j = 0; j < 10; j++) {
-                hbDNNTensorProperties output_properties;
-                RDK_CHECK_SUCCESS(
-                    hbDNNGetOutputTensorProperties(&output_properties, dnn_handle_, j),
-                    "Get output tensor properties failed");
-                
-                // 检查维度是否为4维
-                if (output_properties.validShape.numDimensions != 4) {
-                    // std::cerr << "Warning: Output tensor [" << j << "] is not 4-dimensional. Skipping." << std::endl;
-                    continue; // 跳过非4维张量
-                }
-
-                int32_t h = output_properties.validShape.dimensionSize[1];
-                int32_t w = output_properties.validShape.dimensionSize[2];
-                int32_t c = output_properties.validShape.dimensionSize[3];
-
-                if (h == order_we_want[i][0] && w == order_we_want[i][1] && c == order_we_want[i][2]) {
-                    output_order_[i] = j;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                 std::cerr << "Warning: Could not find matching output tensor for expected shape: ("
-                           << order_we_want[i][0] << ", " << order_we_want[i][1] << ", " << order_we_want[i][2] << ")" << std::endl;
-            }
-        }
-
-        // 检查输出顺序映射是否有效 (检查是否有重复的索引)
-        std::vector<int> check_vec(output_order_, output_order_ + 10);
-        std::sort(check_vec.begin(), check_vec.end());
-        bool duplicate = false;
-        for (size_t k = 0; k < check_vec.size() - 1; ++k) {
-             if (check_vec[k] == check_vec[k+1]) {
-                  duplicate = true;
-                  break;
-             }
-        }
-        int sum = 0;
-        for(int val : check_vec) sum += val;
-
-        if (!duplicate && sum == (0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9)) {
-            std::cout << "\n============ Output Order Mapping for YOLOv8-SEG ============" << std::endl;
-            std::cout << "S-Reg (1/" << 8  << "): output[" << output_order_[0] << "]" << std::endl;
-            std::cout << "M-Reg (1/" << 16 << "): output[" << output_order_[1] << "]" << std::endl;
-            std::cout << "L-Reg (1/" << 32 << "): output[" << output_order_[2] << "]" << std::endl;
-            std::cout << "S-Cls (1/" << 8  << "): output[" << output_order_[3] << "]" << std::endl;
-            std::cout << "M-Cls (1/" << 16 << "): output[" << output_order_[4] << "]" << std::endl;
-            std::cout << "L-Cls (1/" << 32 << "): output[" << output_order_[5] << "]" << std::endl;
-            std::cout << "S-MCE (1/" << 8  << "): output[" << output_order_[6] << "]" << std::endl;
-            std::cout << "M-MCE (1/" << 16 << "): output[" << output_order_[7] << "]" << std::endl;
-            std::cout << "L-MCE (1/" << 32 << "): output[" << output_order_[8] << "]" << std::endl;
-            std::cout << "Proto (1/" << 4  << "): output[" << output_order_[9] << "]" << std::endl;
-            std::cout << "=====================================================\n" << std::endl;
-        } else {
-            std::cout << "YOLOv8-SEG output order check failed (sum=" << sum << ", duplicate=" << duplicate << "), using default order" << std::endl;
+    else if (task_type_ == "segmentation") {
+        if (model_type_ == YOLOV8_SEG) {
+            // 初始化默认顺序
             for (int i = 0; i < 10; i++) {
                 output_order_[i] = i;
             }
-        }
-    }
-    else if (model_type_ == YOLO11_SEG) {
-        // 初始化默认顺序
-        for (int i = 0; i < 10; i++) {
-            output_order_[i] = i;
-        }
-        
-        // 定义YOLO11-SEG期望的输出特征图属性
-        int32_t order_we_want[10][3] = {
-            {H_8_, W_8_, classes_num_},     // output[order[0]]: (1, H/8, W/8, CLASSES_NUM) - S-cls
-            {H_8_, W_8_, 4 * REG},          // output[order[1]]: (1, H/8, W/8, 4*REG) - S-box
-            {H_8_, W_8_, MCES_},            // output[order[2]]: (1, H/8, W/8, MCES) - S-mce
-            {H_16_, W_16_, classes_num_},   // output[order[3]]: (1, H/16, W/16, CLASSES_NUM) - M-cls
-            {H_16_, W_16_, 4 * REG},        // output[order[4]]: (1, H/16, W/16, 4*REG) - M-box
-            {H_16_, W_16_, MCES_},          // output[order[5]]: (1, H/16, W/16, MCES) - M-mce
-            {H_32_, W_32_, classes_num_},   // output[order[6]]: (1, H/32, W/32, CLASSES_NUM) - L-cls
-            {H_32_, W_32_, 4 * REG},        // output[order[7]]: (1, H/32, W/32, 4*REG) - L-box
-            {H_32_, W_32_, MCES_},          // output[order[8]]: (1, H/32, W/32, MCES) - L-mce
-            {H_4_, W_4_, MCES_}             // output[order[9]]: (1, H/4, W/4, MCES) - Proto
-        };
+            
+            // 定义期望的输出特征图属性
+            int32_t order_we_want[10][3] = {
+                {H_8_,  W_8_,  64},           // S-Reg
+                {H_16_, W_16_, 64},           // M-Reg
+                {H_32_, W_32_, 64},           // L-Reg
+                {H_8_,  W_8_,  classes_num_}, // S-Cls
+                {H_16_, W_16_, classes_num_}, // M-Cls
+                {H_32_, W_32_, classes_num_}, // L-Cls
+                {H_8_,  W_8_,  32},           // S-MCE
+                {H_16_, W_16_, 32},           // M-MCE
+                {H_32_, W_32_, 32},           // L-MCE
+                {input_h_ / 4, input_w_ / 4, 32} // Proto 
+            };
 
-        // 遍历每个期望的输出
-        for (int i = 0; i < 10; i++) {
-            bool found = false;
-            for (int j = 0; j < 10; j++) {
-                hbDNNTensorProperties output_properties;
-                RDK_CHECK_SUCCESS(
-                    hbDNNGetOutputTensorProperties(&output_properties, dnn_handle_, j),
-                    "Get output tensor properties failed");
-                
-                // 检查维度是否为4维
-                if (output_properties.validShape.numDimensions != 4) {
-                    continue; // 跳过非4维张量
+            // 遍历每个期望的输出
+            for (int i = 0; i < 10; i++) {
+                bool found = false;
+                for (int j = 0; j < 10; j++) {
+                    hbDNNTensorProperties output_properties;
+                    RDK_CHECK_SUCCESS(
+                        hbDNNGetOutputTensorProperties(&output_properties, dnn_handle_, j),
+                        "Get output tensor properties failed");
+                    
+                    // 检查维度是否为4维
+                    if (output_properties.validShape.numDimensions != 4) {
+                        // std::cerr << "Warning: Output tensor [" << j << "] is not 4-dimensional. Skipping." << std::endl;
+                        continue; // 跳过非4维张量
+                    }
+
+                    int32_t h = output_properties.validShape.dimensionSize[1];
+                    int32_t w = output_properties.validShape.dimensionSize[2];
+                    int32_t c = output_properties.validShape.dimensionSize[3];
+
+                    if (h == order_we_want[i][0] && w == order_we_want[i][1] && c == order_we_want[i][2]) {
+                        output_order_[i] = j;
+                        found = true;
+                        break;
+                    }
                 }
+                if (!found) {
+                    std::cerr << "Warning: Could not find matching output tensor for expected shape: ("
+                            << order_we_want[i][0] << ", " << order_we_want[i][1] << ", " << order_we_want[i][2] << ")" << std::endl;
+                }
+            }
 
-                int32_t h = output_properties.validShape.dimensionSize[1];
-                int32_t w = output_properties.validShape.dimensionSize[2];
-                int32_t c = output_properties.validShape.dimensionSize[3];
-
-                if (h == order_we_want[i][0] && w == order_we_want[i][1] && c == order_we_want[i][2]) {
-                    output_order_[i] = j;
-                    found = true;
+            // 检查输出顺序映射是否有效 (检查是否有重复的索引)
+            std::vector<int> check_vec(output_order_, output_order_ + 10);
+            std::sort(check_vec.begin(), check_vec.end());
+            bool duplicate = false;
+            for (size_t k = 0; k < check_vec.size() - 1; ++k) {
+                if (check_vec[k] == check_vec[k+1]) {
+                    duplicate = true;
                     break;
                 }
             }
-            if (!found) {
-                std::cerr << "Warning: Could not find matching output tensor for expected shape: ("
-                          << order_we_want[i][0] << ", " << order_we_want[i][1] << ", " << order_we_want[i][2] << ")" << std::endl;
+            int sum = 0;
+            for(int val : check_vec) sum += val;
+
+            if (!duplicate && sum == (0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9)) {
+                std::cout << "\n============ Output Order Mapping for YOLOv8-SEG ============" << std::endl;
+                std::cout << "S-Reg (1/" << 8  << "): output[" << output_order_[0] << "]" << std::endl;
+                std::cout << "M-Reg (1/" << 16 << "): output[" << output_order_[1] << "]" << std::endl;
+                std::cout << "L-Reg (1/" << 32 << "): output[" << output_order_[2] << "]" << std::endl;
+                std::cout << "S-Cls (1/" << 8  << "): output[" << output_order_[3] << "]" << std::endl;
+                std::cout << "M-Cls (1/" << 16 << "): output[" << output_order_[4] << "]" << std::endl;
+                std::cout << "L-Cls (1/" << 32 << "): output[" << output_order_[5] << "]" << std::endl;
+                std::cout << "S-MCE (1/" << 8  << "): output[" << output_order_[6] << "]" << std::endl;
+                std::cout << "M-MCE (1/" << 16 << "): output[" << output_order_[7] << "]" << std::endl;
+                std::cout << "L-MCE (1/" << 32 << "): output[" << output_order_[8] << "]" << std::endl;
+                std::cout << "Proto (1/" << 4  << "): output[" << output_order_[9] << "]" << std::endl;
+                std::cout << "=====================================================\n" << std::endl;
+            } else {
+                std::cout << "YOLOv8-SEG output order check failed (sum=" << sum << ", duplicate=" << duplicate << "), using default order" << std::endl;
+                for (int i = 0; i < 10; i++) {
+                    output_order_[i] = i;
+                }
             }
         }
-
-        // 检查输出顺序映射是否有效 (检查是否有重复的索引)
-        std::vector<int> check_vec(output_order_, output_order_ + 10);
-        std::sort(check_vec.begin(), check_vec.end());
-        bool duplicate = false;
-        for (size_t k = 0; k < check_vec.size() - 1; ++k) {
-            if (check_vec[k] == check_vec[k+1]) {
-                duplicate = true;
-                break;
-            }
-        }
-        int sum = 0;
-        for(int val : check_vec) sum += val;
-
-        if (!duplicate && sum == (0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9)) {
-            std::cout << "\n============ Output Order Mapping for YOLO11-SEG ============" << std::endl;
-            std::cout << "S-cls (1/" << 8  << "): output[" << output_order_[0] << "]" << std::endl;
-            std::cout << "S-box (1/" << 8  << "): output[" << output_order_[1] << "]" << std::endl;
-            std::cout << "S-mce (1/" << 8  << "): output[" << output_order_[2] << "]" << std::endl;
-            std::cout << "M-cls (1/" << 16 << "): output[" << output_order_[3] << "]" << std::endl;
-            std::cout << "M-box (1/" << 16 << "): output[" << output_order_[4] << "]" << std::endl;
-            std::cout << "M-mce (1/" << 16 << "): output[" << output_order_[5] << "]" << std::endl;
-            std::cout << "L-cls (1/" << 32 << "): output[" << output_order_[6] << "]" << std::endl;
-            std::cout << "L-box (1/" << 32 << "): output[" << output_order_[7] << "]" << std::endl;
-            std::cout << "L-mce (1/" << 32 << "): output[" << output_order_[8] << "]" << std::endl;
-            std::cout << "Proto (1/" << 4  << "): output[" << output_order_[9] << "]" << std::endl;
-            std::cout << "=====================================================\n" << std::endl;
-        } else {
-            std::cout << "YOLO11-SEG output order check failed (sum=" << sum << ", duplicate=" << duplicate << "), using default order" << std::endl;
+        else if (model_type_ == YOLO11_SEG) {
+            // 初始化默认顺序
             for (int i = 0; i < 10; i++) {
                 output_order_[i] = i;
             }
+            
+            // 定义YOLO11-SEG期望的输出特征图属性
+            int32_t order_we_want[10][3] = {
+                {H_8_, W_8_, classes_num_},     // output[order[0]]: (1, H/8, W/8, CLASSES_NUM) - S-cls
+                {H_8_, W_8_, 4 * REG},          // output[order[1]]: (1, H/8, W/8, 4*REG) - S-box
+                {H_8_, W_8_, MCES_},            // output[order[2]]: (1, H/8, W/8, MCES) - S-mce
+                {H_16_, W_16_, classes_num_},   // output[order[3]]: (1, H/16, W/16, CLASSES_NUM) - M-cls
+                {H_16_, W_16_, 4 * REG},        // output[order[4]]: (1, H/16, W/16, 4*REG) - M-box
+                {H_16_, W_16_, MCES_},          // output[order[5]]: (1, H/16, W/16, MCES) - M-mce
+                {H_32_, W_32_, classes_num_},   // output[order[6]]: (1, H/32, W/32, CLASSES_NUM) - L-cls
+                {H_32_, W_32_, 4 * REG},        // output[order[7]]: (1, H/32, W/32, 4*REG) - L-box
+                {H_32_, W_32_, MCES_},          // output[order[8]]: (1, H/32, W/32, MCES) - L-mce
+                {H_4_, W_4_, MCES_}             // output[order[9]]: (1, H/4, W/4, MCES) - Proto
+            };
+
+            // 遍历每个期望的输出
+            for (int i = 0; i < 10; i++) {
+                bool found = false;
+                for (int j = 0; j < 10; j++) {
+                    hbDNNTensorProperties output_properties;
+                    RDK_CHECK_SUCCESS(
+                        hbDNNGetOutputTensorProperties(&output_properties, dnn_handle_, j),
+                        "Get output tensor properties failed");
+                    
+                    // 检查维度是否为4维
+                    if (output_properties.validShape.numDimensions != 4) {
+                        continue; // 跳过非4维张量
+                    }
+
+                    int32_t h = output_properties.validShape.dimensionSize[1];
+                    int32_t w = output_properties.validShape.dimensionSize[2];
+                    int32_t c = output_properties.validShape.dimensionSize[3];
+
+                    if (h == order_we_want[i][0] && w == order_we_want[i][1] && c == order_we_want[i][2]) {
+                        output_order_[i] = j;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    std::cerr << "Warning: Could not find matching output tensor for expected shape: ("
+                            << order_we_want[i][0] << ", " << order_we_want[i][1] << ", " << order_we_want[i][2] << ")" << std::endl;
+                }
+            }
+
+            // 检查输出顺序映射是否有效 (检查是否有重复的索引)
+            std::vector<int> check_vec(output_order_, output_order_ + 10);
+            std::sort(check_vec.begin(), check_vec.end());
+            bool duplicate = false;
+            for (size_t k = 0; k < check_vec.size() - 1; ++k) {
+                if (check_vec[k] == check_vec[k+1]) {
+                    duplicate = true;
+                    break;
+                }
+            }
+            int sum = 0;
+            for(int val : check_vec) sum += val;
+
+            if (!duplicate && sum == (0 + 1 + 2 + 3 + 4 + 5 + 6 + 7 + 8 + 9)) {
+                std::cout << "\n============ Output Order Mapping for YOLO11-SEG ============" << std::endl;
+                std::cout << "S-cls (1/" << 8  << "): output[" << output_order_[0] << "]" << std::endl;
+                std::cout << "S-box (1/" << 8  << "): output[" << output_order_[1] << "]" << std::endl;
+                std::cout << "S-mce (1/" << 8  << "): output[" << output_order_[2] << "]" << std::endl;
+                std::cout << "M-cls (1/" << 16 << "): output[" << output_order_[3] << "]" << std::endl;
+                std::cout << "M-box (1/" << 16 << "): output[" << output_order_[4] << "]" << std::endl;
+                std::cout << "M-mce (1/" << 16 << "): output[" << output_order_[5] << "]" << std::endl;
+                std::cout << "L-cls (1/" << 32 << "): output[" << output_order_[6] << "]" << std::endl;
+                std::cout << "L-box (1/" << 32 << "): output[" << output_order_[7] << "]" << std::endl;
+                std::cout << "L-mce (1/" << 32 << "): output[" << output_order_[8] << "]" << std::endl;
+                std::cout << "Proto (1/" << 4  << "): output[" << output_order_[9] << "]" << std::endl;
+                std::cout << "=====================================================\n" << std::endl;
+            } else {
+                std::cout << "YOLO11-SEG output order check failed (sum=" << sum << ", duplicate=" << duplicate << "), using default order" << std::endl;
+                for (int i = 0; i < 10; i++) {
+                    output_order_[i] = i;
+                }
+            }
+        }
+        else if (model_type_ == FCN) {
+            // FCN只有一个输出，直接设置为0
+            output_order_[0] = 0;
         }
     }
-    
     return true;
 }
 
@@ -541,6 +551,9 @@ bool BPU_Detect::Model_Info_check()
         return false;
     } else if (model_type_ == YOLO11_SEG && output_count_ != 10) {
         std::cout << "YOLO11-SEG model should have 10 outputs, but actually has " << output_count_ << " outputs" << std::endl;
+        return false;
+    } else if (model_type_ == FCN && output_count_ != 1) {
+        std::cout << "FCN model should have 1 output, but actually has " << output_count_ << " outputs" << std::endl;
         return false;
     }
 
@@ -880,6 +893,12 @@ bool BPU_Detect::Model_Postprocess()
                 return false;
             }
         }
+        else if(model_type_ == FCN){
+            if(!Model_Segmentation_Postprocess_FCN()){
+                std::cout << "FCN Segmentation postprocess failed" << std::endl;
+                return false;
+            }
+        }
         else {
              std::cout << "Error: Segmentation task specified, but model is not YOLOV8_SEG or YOLO11_SEG." << std::endl;
             return false;
@@ -890,7 +909,7 @@ bool BPU_Detect::Model_Postprocess()
             std::cout << "Classification postprocess failed" << std::endl;
             return false;
         }
-    } else { // <--- 添加一个else处理未知或不支持的任务类型
+    } else { 
         std::cout << "Unknown or unsupported task type: " << task_type_ << " for postprocessing." << std::endl;
         return false;
     }
@@ -923,122 +942,132 @@ void BPU_Detect::Model_Draw(){
             }
         }
     }
-    else if(task_type_ == "segmentation" || model_type_ == YOLOV8_SEG){ // <--- 处理分割任务
-        output_img_ = input_img_.clone();
-        
-        bool has_results = false;
-        for (size_t cls_id = 0; cls_id < indices_.size(); ++cls_id) { // indices_ size is classes_num_
-            if (!indices_[cls_id].empty()) {
-                has_results = true;
-                break;
+    else if(task_type_ == "segmentation"){ // <--- 处理分割任务
+        if(model_type_ == YOLOV8_SEG){
+            output_img_ = input_img_.clone();
+            
+            bool has_results = false;
+            for (size_t cls_id = 0; cls_id < indices_.size(); ++cls_id) { // indices_ size is classes_num_
+                if (!indices_[cls_id].empty()) {
+                    has_results = true;
+                    break;
+                }
+            }
+
+            if (!has_results) { // 检查是否有任何类别的结果
+                std::cout << "Warning: No segmentation results to draw." << std::endl;
+                return;
+            }
+
+            cv::Mat overlay = cv::Mat::zeros(output_img_.size(), output_img_.type());
+            int drawn_masks_count = 0;
+
+            for (size_t cls_id = 0; cls_id < indices_.size(); ++cls_id) {
+                if (cls_id >= class_names_.size()) continue;
+                cv::Scalar color = cv::Scalar(rand() % 200 + 30, rand() % 200 + 30, rand() % 200 + 30);
+
+                // 遍历该类别的所有检测结果
+                for (size_t i = 0; i < indices_[cls_id].size(); ++i) { // i is the index within this class's results
+                    int mask_index = indices_[cls_id][i]; // 获取 masks_ 的索引
+
+                    // --- 安全检查 mask_index ---
+                    if (mask_index < 0 || mask_index >= static_cast<int>(masks_.size())) {
+                        std::cerr << "Warning: Invalid mask index (" << mask_index << ") encountered during drawing. Max mask index: " << masks_.size() -1 << std::endl;
+                        continue;
+                    }
+
+                    // --- 使用 i 获取对应的 bbox 和 score --- 
+                    if (i >= bboxes_[cls_id].size() || i >= scores_[cls_id].size()) {
+                        std::cerr << "Warning: Index mismatch for bbox/score during drawing (i=" << i << ", cls_id=" << cls_id << "). Skipping." << std::endl;
+                        continue;
+                    }
+                    cv::Rect2d rect = bboxes_[cls_id][i]; // 获取对应的 bbox (模型输入尺寸)
+                    float score = scores_[cls_id][i];   // 获取对应的 score
+
+                    cv::Mat mask = masks_[mask_index]; // 使用 mask_index 获取对应的掩码
+
+                    // 确保掩码有效且尺寸正确
+                    if (mask.empty() || mask.size() != output_img_.size() || mask.type() != CV_8UC1) {
+                        std::cerr << "Warning: Invalid mask (index: " << mask_index << ") during drawing." << std::endl;
+                        continue; 
+                    }
+
+                    // 将掩码绘制到覆盖层
+                    overlay.setTo(color, mask);
+                    drawn_masks_count++;
+
+                    // --- 绘制边界框和标签 ---
+                    float x1 = (rect.x - x_shift_) / x_scale_;
+                    float y1 = (rect.y - y_shift_) / y_scale_;
+                    float x2 = x1 + rect.width / x_scale_;
+                    float y2 = y1 + rect.height / y_scale_;
+
+                    // 边界框坐标限制在图像范围内
+                    x1 = std::max(0.0f, std::min((float)output_img_.cols - 1, x1));
+                    y1 = std::max(0.0f, std::min((float)output_img_.rows - 1, y1));
+                    x2 = std::max(0.0f, std::min((float)output_img_.cols - 1, x2));
+                    y2 = std::max(0.0f, std::min((float)output_img_.rows - 1, y2));
+
+                    // Prevent drawing zero-width/height rectangles
+                    if (x2 <= x1 || y2 <= y1) continue; 
+
+                    cv::rectangle(output_img_, cv::Point(static_cast<int>(x1), static_cast<int>(y1)), 
+                                                cv::Point(static_cast<int>(x2), static_cast<int>(y2)), 
+                                                color, line_size_);
+
+                    std::string label = class_names_[cls_id] + ": " + std::to_string(static_cast<int>(score * 100)) + "%";
+                    int baseline = 0;
+                    cv::Size text_size = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, font_size_, font_thickness_, &baseline);
+
+                    // 确保标签绘制在图像内
+                    int label_y = (y1 - text_size.height - 5 > 0) ? (static_cast<int>(y1) - 5) : (static_cast<int>(y1) + text_size.height + baseline + 5); // Adjust if goes below 0
+                    int label_x_end = static_cast<int>(x1) + text_size.width;
+                    int bg_x1 = static_cast<int>(x1);
+                    int bg_y1 = label_y - text_size.height - baseline;
+                    int bg_x2 = label_x_end;
+                    int bg_y2 = label_y + baseline; // baseline is positive
+
+                    // Adjust background/text if it goes off screen
+                    if (bg_y1 < 0) {
+                        label_y -= bg_y1; // Shift text down
+                        bg_y1 = 0;
+                        bg_y2 = text_size.height + baseline; 
+                    }
+                    if (bg_x2 >= output_img_.cols) {
+                        bg_x2 = output_img_.cols -1;
+                    }
+                    if (bg_y2 >= output_img_.rows) {
+                        bg_y2 = output_img_.rows - 1;
+                        // Optionally adjust label_y if bg got pushed up significantly
+                        if (label_y > bg_y2 - baseline) label_y = bg_y2 - baseline;
+                    }
+                    if (bg_x1 >= bg_x2 || bg_y1 >= bg_y2) continue; // Skip if rect is invalid
+
+                    cv::rectangle(output_img_, 
+                                cv::Point(bg_x1, bg_y1),
+                                cv::Point(bg_x2, bg_y2),
+                                color, -1);
+                    cv::putText(output_img_, label, 
+                                cv::Point(bg_x1, label_y - baseline), // Use bg_x1 for text start
+                            cv::FONT_HERSHEY_SIMPLEX, font_size_, 
+                            cv::Scalar(255, 255, 255), font_thickness_);
+
+                }
+            }
+
+            if (drawn_masks_count > 0) {
+                cv::addWeighted(output_img_, 0.6, overlay, 0.4, 0, output_img_);
+            } else {
+                std::cout << "Warning: No valid masks were drawn." << std::endl;
             }
         }
+        else if(model_type_ == FCN){
+            
 
-        if (!has_results) { // 检查是否有任何类别的结果
-            std::cout << "Warning: No segmentation results to draw." << std::endl;
-            return;
-        }
 
-        cv::Mat overlay = cv::Mat::zeros(output_img_.size(), output_img_.type());
-        int drawn_masks_count = 0;
+        //TODO: FCN的绘制
 
-        for (size_t cls_id = 0; cls_id < indices_.size(); ++cls_id) {
-             if (cls_id >= class_names_.size()) continue;
-             cv::Scalar color = cv::Scalar(rand() % 200 + 30, rand() % 200 + 30, rand() % 200 + 30);
 
-             // 遍历该类别的所有检测结果
-             for (size_t i = 0; i < indices_[cls_id].size(); ++i) { // i is the index within this class's results
-                 int mask_index = indices_[cls_id][i]; // 获取 masks_ 的索引
-
-                 // --- 安全检查 mask_index ---
-                 if (mask_index < 0 || mask_index >= static_cast<int>(masks_.size())) {
-                     std::cerr << "Warning: Invalid mask index (" << mask_index << ") encountered during drawing. Max mask index: " << masks_.size() -1 << std::endl;
-                     continue;
-                 }
-
-                 // --- 使用 i 获取对应的 bbox 和 score --- 
-                 if (i >= bboxes_[cls_id].size() || i >= scores_[cls_id].size()) {
-                      std::cerr << "Warning: Index mismatch for bbox/score during drawing (i=" << i << ", cls_id=" << cls_id << "). Skipping." << std::endl;
-                      continue;
-                 }
-                 cv::Rect2d rect = bboxes_[cls_id][i]; // 获取对应的 bbox (模型输入尺寸)
-                 float score = scores_[cls_id][i];   // 获取对应的 score
-
-                 cv::Mat mask = masks_[mask_index]; // 使用 mask_index 获取对应的掩码
-
-                 // 确保掩码有效且尺寸正确
-                 if (mask.empty() || mask.size() != output_img_.size() || mask.type() != CV_8UC1) {
-                      std::cerr << "Warning: Invalid mask (index: " << mask_index << ") during drawing." << std::endl;
-                      continue; 
-                 }
-
-                 // 将掩码绘制到覆盖层
-                 overlay.setTo(color, mask);
-                 drawn_masks_count++;
-
-                 // --- 绘制边界框和标签 ---
-                 float x1 = (rect.x - x_shift_) / x_scale_;
-                 float y1 = (rect.y - y_shift_) / y_scale_;
-                 float x2 = x1 + rect.width / x_scale_;
-                 float y2 = y1 + rect.height / y_scale_;
-
-                 // 边界框坐标限制在图像范围内
-                 x1 = std::max(0.0f, std::min((float)output_img_.cols - 1, x1));
-                 y1 = std::max(0.0f, std::min((float)output_img_.rows - 1, y1));
-                 x2 = std::max(0.0f, std::min((float)output_img_.cols - 1, x2));
-                 y2 = std::max(0.0f, std::min((float)output_img_.rows - 1, y2));
-
-                 // Prevent drawing zero-width/height rectangles
-                 if (x2 <= x1 || y2 <= y1) continue; 
-
-                 cv::rectangle(output_img_, cv::Point(static_cast<int>(x1), static_cast<int>(y1)), 
-                                            cv::Point(static_cast<int>(x2), static_cast<int>(y2)), 
-                                            color, line_size_);
-
-                 std::string label = class_names_[cls_id] + ": " + std::to_string(static_cast<int>(score * 100)) + "%";
-                int baseline = 0;
-                 cv::Size text_size = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, font_size_, font_thickness_, &baseline);
-
-                 // 确保标签绘制在图像内
-                 int label_y = (y1 - text_size.height - 5 > 0) ? (static_cast<int>(y1) - 5) : (static_cast<int>(y1) + text_size.height + baseline + 5); // Adjust if goes below 0
-                 int label_x_end = static_cast<int>(x1) + text_size.width;
-                 int bg_x1 = static_cast<int>(x1);
-                 int bg_y1 = label_y - text_size.height - baseline;
-                 int bg_x2 = label_x_end;
-                 int bg_y2 = label_y + baseline; // baseline is positive
-
-                 // Adjust background/text if it goes off screen
-                 if (bg_y1 < 0) {
-                    label_y -= bg_y1; // Shift text down
-                    bg_y1 = 0;
-                    bg_y2 = text_size.height + baseline; 
-                 }
-                 if (bg_x2 >= output_img_.cols) {
-                      bg_x2 = output_img_.cols -1;
-                 }
-                 if (bg_y2 >= output_img_.rows) {
-                      bg_y2 = output_img_.rows - 1;
-                      // Optionally adjust label_y if bg got pushed up significantly
-                      if (label_y > bg_y2 - baseline) label_y = bg_y2 - baseline;
-                 }
-                 if (bg_x1 >= bg_x2 || bg_y1 >= bg_y2) continue; // Skip if rect is invalid
-
-                cv::rectangle(output_img_, 
-                               cv::Point(bg_x1, bg_y1),
-                               cv::Point(bg_x2, bg_y2),
-                             color, -1);
-                cv::putText(output_img_, label, 
-                             cv::Point(bg_x1, label_y - baseline), // Use bg_x1 for text start
-                           cv::FONT_HERSHEY_SIMPLEX, font_size_, 
-                           cv::Scalar(255, 255, 255), font_thickness_);
-
-             }
-        }
-
-        if (drawn_masks_count > 0) {
-            cv::addWeighted(output_img_, 0.6, overlay, 0.4, 0, output_img_);
-        } else {
-             std::cout << "Warning: No valid masks were drawn." << std::endl;
         }
     } else if (task_type_ == "classification") {
         // 为分类结果创建顶部叠加层
@@ -1117,60 +1146,65 @@ void BPU_Detect::Model_Print() const {
         std::cout << "========================================\n" << std::endl;
     }
     else if(task_type_ == "segmentation"){
-        // TODO: 打印分割结果
-        std::cout << "\n============ Segmentation Results ============" << std::endl;
-        
-        // 计算总检测实例数
-        int total_instances = 0;
-        for (int cls_id = 0; cls_id < classes_num_; ++cls_id) {
-            total_instances += indices_[cls_id].size();
-        }
-        
-        // 打印总检测实例数和总掩码数
-        std::cout << "Total instances detected: " << total_instances 
-                 << " (Total masks generated: " << masks_.size() << ")" << std::endl;
-        
-        // 按类别打印详细信息
-        for (int cls_id = 0; cls_id < classes_num_; ++cls_id) {
-            if (!indices_[cls_id].empty()) {
-                std::string class_name = (cls_id < static_cast<int>(class_names_.size())) ? 
-                                     class_names_[cls_id] : "class" + std::to_string(cls_id);
-                
-                std::cout << "\nClass: " << class_name << " (ID: " << cls_id << ")" << std::endl;
-                std::cout << "  Instances: " << indices_[cls_id].size() << std::endl;
-                std::cout << "  Details:" << std::endl;
-                
-                for(size_t i = 0; i < indices_[cls_id].size(); i++) {
-                    int idx = indices_[cls_id][i];
-                    // 计算原始图像坐标系中的边界框
-                    float x1 = (bboxes_[cls_id][idx].x - x_shift_) / x_scale_;
-                    float y1 = (bboxes_[cls_id][idx].y - y_shift_) / y_scale_;
-                    float x2 = x1 + (bboxes_[cls_id][idx].width) / x_scale_;
-                    float y2 = y1 + (bboxes_[cls_id][idx].height) / y_scale_;
-                    float score = scores_[cls_id][idx];
+        if(model_type_ == YOLOV8_SEG || model_type_ == YOLO11_SEG){
+            // TODO: 打印分割结果
+            std::cout << "\n============ Segmentation Results ============" << std::endl;
+            
+            // 计算总检测实例数
+            int total_instances = 0;
+            for (int cls_id = 0; cls_id < classes_num_; ++cls_id) {
+                total_instances += indices_[cls_id].size();
+            }
+            
+            // 打印总检测实例数和总掩码数
+            std::cout << "Total instances detected: " << total_instances 
+                    << " (Total masks generated: " << masks_.size() << ")" << std::endl;
+            
+            // 按类别打印详细信息
+            for (int cls_id = 0; cls_id < classes_num_; ++cls_id) {
+                if (!indices_[cls_id].empty()) {
+                    std::string class_name = (cls_id < static_cast<int>(class_names_.size())) ? 
+                                        class_names_[cls_id] : "class" + std::to_string(cls_id);
                     
-                    // 获取掩码索引（在indices_中存储的是masks_的索引）
-                    int mask_idx = indices_[cls_id][i];
+                    std::cout << "\nClass: " << class_name << " (ID: " << cls_id << ")" << std::endl;
+                    std::cout << "  Instances: " << indices_[cls_id].size() << std::endl;
+                    std::cout << "  Details:" << std::endl;
                     
-                    // 计算掩码中非零像素的数量（即掩码面积）
-                    int mask_area = 0;
-                    if (mask_idx >= 0 && mask_idx < static_cast<int>(masks_.size())) {
-                        mask_area = cv::countNonZero(masks_[mask_idx]);
+                    for(size_t i = 0; i < indices_[cls_id].size(); i++) {
+                        int idx = indices_[cls_id][i];
+                        // 计算原始图像坐标系中的边界框
+                        float x1 = (bboxes_[cls_id][idx].x - x_shift_) / x_scale_;
+                        float y1 = (bboxes_[cls_id][idx].y - y_shift_) / y_scale_;
+                        float x2 = x1 + (bboxes_[cls_id][idx].width) / x_scale_;
+                        float y2 = y1 + (bboxes_[cls_id][idx].height) / y_scale_;
+                        float score = scores_[cls_id][idx];
+                        
+                        // 获取掩码索引（在indices_中存储的是masks_的索引）
+                        int mask_idx = indices_[cls_id][i];
+                        
+                        // 计算掩码中非零像素的数量（即掩码面积）
+                        int mask_area = 0;
+                        if (mask_idx >= 0 && mask_idx < static_cast<int>(masks_.size())) {
+                            mask_area = cv::countNonZero(masks_[mask_idx]);
+                        }
+                        
+                        // 打印每个实例的详细信息
+                        std::cout << "  Instance " << i + 1 << ":" << std::endl;
+                        std::cout << "    Position: (" << std::fixed << std::setprecision(1) 
+                                << x1 << ", " << y1 << ") to (" << x2 << ", " << y2 << ")" << std::endl;
+                        std::cout << "    Size: " << std::fixed << std::setprecision(1) 
+                                << (x2 - x1) << " x " << (y2 - y1) << " pixels" << std::endl;
+                        std::cout << "    Mask area: " << mask_area << " pixels" << std::endl;
+                        std::cout << "    Confidence: " << std::fixed << std::setprecision(2) 
+                                << score * 100 << "%" << std::endl;
                     }
-                    
-                    // 打印每个实例的详细信息
-                    std::cout << "  Instance " << i + 1 << ":" << std::endl;
-                    std::cout << "    Position: (" << std::fixed << std::setprecision(1) 
-                             << x1 << ", " << y1 << ") to (" << x2 << ", " << y2 << ")" << std::endl;
-                    std::cout << "    Size: " << std::fixed << std::setprecision(1) 
-                             << (x2 - x1) << " x " << (y2 - y1) << " pixels" << std::endl;
-                    std::cout << "    Mask area: " << mask_area << " pixels" << std::endl;
-                    std::cout << "    Confidence: " << std::fixed << std::setprecision(2) 
-                             << score * 100 << "%" << std::endl;
                 }
             }
+            std::cout << "========================================\n" << std::endl;
         }
-        std::cout << "========================================\n" << std::endl;
+        else if(model_type_ == FCN){
+            //TODO: FCN的打印
+        }
     }
     else if(task_type_ == "classification"){
         // 打印分类结果
@@ -2969,4 +3003,9 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLO11() {
     std::cout << "YOLO11-Seg post-processing finished. Stored " << masks_.size() << " final masks." << std::endl;
 
     return true;
+}
+
+bool BPU_Detect::Model_Segmentation_Postprocess_FCN(){
+
+
 }

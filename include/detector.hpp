@@ -50,6 +50,7 @@ enum ModelType {
     YOLOV8 = 2,   // YOLOv8系列模型
     YOLOV8_SEG = 3, // YOLOv8分割模型
     YOLO11_SEG = 4, // YOLO11分割模型
+    FCN = 5,      // FCN语义分割模型
     UNKNOWN = -1  // 未知模型类型
 };
 
@@ -116,6 +117,7 @@ class BPU_Detect{
         bool Model_Detection_Postprocess_YOLOV8(); // YOLOv8专用后处理
         bool Model_Segmentation_Postprocess_YOLOV8(); // YOLOv8-Seg专用后处理
         bool Model_Segmentation_Postprocess_YOLO11(); // YOLO11-Seg专用后处理
+        bool Model_Segmentation_Postprocess_FCN(); // FCN专用后处理
         void Model_Process_FeatureMap(hbDNNTensor& output_tensor, 
                                      int feature_h, 
                                      int feature_w, 
@@ -230,6 +232,10 @@ class BPU_Detect{
         
         // YOLO11-Seg/YOLO8-Seg的掩码系数数量，默认为32
         const int MCES_ = 32;
+
+        // FCN语义分割相关数据
+        cv::Mat semantic_mask_;     // 语义分割结果掩码
+        std::vector<cv::Vec3b> color_map_; // 类别颜色映射表
         
 };
 
