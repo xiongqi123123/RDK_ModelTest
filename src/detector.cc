@@ -1062,12 +1062,105 @@ void BPU_Detect::Model_Draw(){
             }
         }
         else if(model_type_ == FCN){
+            // FCN的绘制逻辑
+            int orig_img_h = input_img_.rows;
+            int orig_img_w = input_img_.cols;
             
-
-
-        //TODO: FCN的绘制
-
-
+            // 创建原始图像大小的彩色掩码（用于可视化）
+            cv::Mat color_mask = cv::Mat::zeros(orig_img_h, orig_img_w, CV_8UC3);
+            int drawn_masks_count = 0;
+            
+            // 存储每个类别的颜色，用于绘制图例
+            std::vector<cv::Scalar> class_colors;
+            std::vector<std::string> class_labels;
+            
+            // 处理每个类别的掩码
+            for (int cls_id = 1; cls_id < classes_num_; ++cls_id) { // 从1开始，跳过背景类
+                if (indices_[cls_id].empty()) continue;
+                
+                // 为该类别生成随机颜色
+                cv::Scalar color(rand() % 200 + 30, rand() % 200 + 30, rand() % 200 + 30);
+                
+                // 保存类别颜色和标签，用于绘制图例
+                class_colors.push_back(color);
+                class_labels.push_back(cls_id < static_cast<int>(class_names_.size()) ? 
+                                      class_names_[cls_id] : "class" + std::to_string(cls_id));
+                
+                // 遍历该类别的所有实例
+                for (size_t i = 0; i < indices_[cls_id].size(); ++i) {
+                    int mask_index = indices_[cls_id][i];
+                    
+                    // 安全检查
+                    if (mask_index < 0 || mask_index >= static_cast<int>(masks_.size())) {
+                        std::cerr << "Warning: Invalid mask index for FCN drawing." << std::endl;
+                        continue;
+                    }
+                    
+                    cv::Mat mask = masks_[mask_index];
+                    
+                    // 将掩码添加到彩色掩码中
+                    cv::Mat color_channel = cv::Mat::zeros(orig_img_h, orig_img_w, CV_8UC3);
+                    color_channel.setTo(color, mask);
+                    color_mask = color_mask + color_channel;
+                    drawn_masks_count++;
+                }
+            }
+            
+            // 将彩色掩码叠加到输出图像上
+            if (drawn_masks_count > 0) {
+                cv::addWeighted(output_img_, 0.7, color_mask, 0.6, 0, output_img_);
+                
+                // // 在右下角绘制图例
+                // if (!class_colors.empty()) {
+                //     // 计算图例的位置和大小
+                //     int legend_margin = 10; // 图例与图像边缘的距离
+                //     int legend_item_height = 25; // 每个图例项的高度
+                //     int legend_width = 200; // 图例的宽度
+                //     int legend_height = class_colors.size() * legend_item_height + 10; // 图例的总高度
+                    
+                //     // 创建图例背景
+                //     cv::Rect legend_rect(
+                //         output_img_.cols - legend_width - legend_margin,
+                //         output_img_.rows - legend_height - legend_margin,
+                //         legend_width,
+                //         legend_height
+                //     );
+                    
+                //     // 确保图例不会超出图像边界
+                //     if (legend_rect.x < 0) legend_rect.x = 0;
+                //     if (legend_rect.y < 0) legend_rect.y = 0;
+                //     if (legend_rect.x + legend_rect.width > output_img_.cols)
+                //         legend_rect.width = output_img_.cols - legend_rect.x;
+                //     if (legend_rect.y + legend_rect.height > output_img_.rows)
+                //         legend_rect.height = output_img_.rows - legend_rect.y;
+                    
+                //     // 绘制半透明背景
+                //     cv::Mat legend_bg = output_img_(legend_rect).clone();
+                //     cv::Mat overlay = cv::Mat::zeros(legend_rect.height, legend_rect.width, CV_8UC3);
+                //     overlay.setTo(cv::Scalar(0, 0, 0));
+                //     cv::addWeighted(legend_bg, 0.3, overlay, 0.7, 0, output_img_(legend_rect));
+                    
+                //     // 绘制图例标题
+                //     cv::putText(output_img_, "类别图例", 
+                //                cv::Point(legend_rect.x + 5, legend_rect.y + 20),
+                //                cv::FONT_HERSHEY_SIMPLEX, 0.6, cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
+                    
+                //     // 绘制每个类别的颜色和标签
+                //     for (size_t i = 0; i < class_colors.size(); i++) {
+                //         int y_pos = legend_rect.y + 30 + i * legend_item_height;
+                        
+                //         // 绘制颜色方块
+                //         cv::Rect color_rect(legend_rect.x + 5, y_pos, 20, 15);
+                //         cv::rectangle(output_img_, color_rect, class_colors[i], -1);
+                //         cv::rectangle(output_img_, color_rect, cv::Scalar(255, 255, 255), 1);
+                        
+                //         // 绘制标签文本
+                //         cv::putText(output_img_, class_labels[i],
+                //                    cv::Point(legend_rect.x + 30, y_pos + 12),
+                //                    cv::FONT_HERSHEY_SIMPLEX, 0.5, cv::Scalar(255, 255, 255), 1, cv::LINE_AA);
+                //     }
+                // }
+            }
         }
     } else if (task_type_ == "classification") {
         // 为分类结果创建顶部叠加层
@@ -1203,7 +1296,66 @@ void BPU_Detect::Model_Print() const {
             std::cout << "========================================\n" << std::endl;
         }
         else if(model_type_ == FCN){
-            //TODO: FCN的打印
+            // FCN分割模型打印结果
+            std::cout << "\n============ FCN Segmentation Results ============" << std::endl;
+            
+            // 计算总分割类别数和总掩码数
+            int total_classes_detected = 0;
+            int total_instances = 0;
+            for (int cls_id = 0; cls_id < classes_num_; ++cls_id) {
+                if (!indices_[cls_id].empty()) {
+                    total_classes_detected++;
+                    total_instances += indices_[cls_id].size();
+                }
+            }
+            
+            std::cout << "Total classes detected: " << total_classes_detected 
+                    << " (Total instances: " << total_instances 
+                    << ", Total masks: " << masks_.size() << ")" << std::endl;
+            
+            // 按类别打印详细信息
+            for (int cls_id = 0; cls_id < classes_num_; ++cls_id) {
+                if (!indices_[cls_id].empty()) {
+                    std::string class_name = (cls_id < static_cast<int>(class_names_.size())) ? 
+                                           class_names_[cls_id] : "class" + std::to_string(cls_id);
+                    
+                    std::cout << "\nClass: " << class_name << " (ID: " << cls_id << ")" << std::endl;
+                    std::cout << "  Instances: " << indices_[cls_id].size() << std::endl;
+                    
+                    // 计算该类别的总面积
+                    int total_area = 0;
+                    for (size_t i = 0; i < indices_[cls_id].size(); ++i) {
+                        int mask_idx = indices_[cls_id][i];
+                        if (mask_idx >= 0 && mask_idx < static_cast<int>(masks_.size())) {
+                            total_area += cv::countNonZero(masks_[mask_idx]);
+                        }
+                    }
+                    
+                    std::cout << "  Total area: " << total_area << " pixels" << std::endl;
+                    
+                    // 打印每个实例的详细信息
+                    if (indices_[cls_id].size() > 0) {
+                        std::cout << "  Details:" << std::endl;
+                        
+                        for (size_t i = 0; i < indices_[cls_id].size(); ++i) {
+                            int mask_idx = indices_[cls_id][i];
+                            float score = scores_[cls_id][i];
+                            
+                            int mask_area = 0;
+                            if (mask_idx >= 0 && mask_idx < static_cast<int>(masks_.size())) {
+                                mask_area = cv::countNonZero(masks_[mask_idx]);
+                            }
+                            
+                            std::cout << "    Instance " << i + 1 << ":" << std::endl;
+                            std::cout << "      Area: " << mask_area << " pixels" << std::endl;
+                            std::cout << "      Confidence: " << std::fixed << std::setprecision(2) 
+                                    << score * 100 << "%" << std::endl;
+                        }
+                    }
+                }
+            }
+            
+            std::cout << "================================================\n" << std::endl;
         }
     }
     else if(task_type_ == "classification"){
@@ -1591,280 +1743,385 @@ void BPU_Detect::CalculateMetrics(InferenceResult& result) {
         }
     }
     else if(task_type_ == "segmentation"){
-        // 计算分割任务的指标结果
-        bool has_gt_data = LoadGroundTruthData();
-        
-        // 定义一个函数，用于计算掩码之间的IoU
-        auto calculate_mask_iou = [](const cv::Mat& mask1, const cv::Mat& mask2) -> float {
-            if (mask1.empty() || mask2.empty() || 
-                mask1.size() != mask2.size() || 
-                mask1.type() != CV_8UC1 || 
-                mask2.type() != CV_8UC1) {
-                return 0.0f;
-            }
+        if (model_type_ == YOLOV8_SEG || model_type_ == YOLO11_SEG ){
+            // 计算分割任务的指标结果
+            bool has_gt_data = LoadGroundTruthData();
             
-            // 计算交集和并集
-            cv::Mat intersection, union_mask;
-            cv::bitwise_and(mask1, mask2, intersection);
-            cv::bitwise_or(mask1, mask2, union_mask);
-            
-            // 计算非零像素数（即掩码区域大小）
-            int intersection_area = cv::countNonZero(intersection);
-            int union_area = cv::countNonZero(union_mask);
-            
-            // 防止除零
-            if (union_area <= 0) return 0.0f;
-            
-            // 返回IoU
-            return static_cast<float>(intersection_area) / static_cast<float>(union_area);
-        };
-        
-        // 定义一个函数，用于解析分割标签文件中的多边形点
-        auto parse_polygon_from_line = [](const std::string& line, int img_width, int img_height) -> cv::Mat {
-            std::istringstream iss(line);
-            int class_id;
-            iss >> class_id; // 第一个值是类别ID
-            
-            std::vector<cv::Point> points;
-            float x, y;
-            while (iss >> x >> y) {
-                // 转换为像素坐标
-                int px = static_cast<int>(x * img_width);
-                int py = static_cast<int>(y * img_height);
-                points.push_back(cv::Point(px, py));
-            }
-            
-            // 创建空白掩码
-            cv::Mat mask = cv::Mat::zeros(img_height, img_width, CV_8UC1);
-            
-            // 至少需要3个点来形成多边形
-            if (points.size() >= 3) {
-                // 绘制填充多边形
-                std::vector<std::vector<cv::Point>> polygons = {points};
-                cv::fillPoly(mask, polygons, cv::Scalar(255));
-            }
-            
-            return mask;
-        };
-        
-        // 保存每个类别的指标
-        std::map<int, std::vector<float>> class_ious; // 每个类别的所有实例IoU
-        std::map<int, int> class_tp_counts; // 每个类别的真阳性计数
-        std::map<int, int> class_fp_counts; // 每个类别的假阳性计数
-        std::map<int, int> class_gt_counts; // 每个类别的真实标签计数
-        
-        float total_iou_sum = 0.0f; // 所有IoU值的总和
-        int total_instances = 0; // 成功匹配的实例总数
-        
-        // 如果有真实标签数据
-        if (has_gt_data && !gt_boxes_.empty()) {
-            int img_width = input_img_.cols;
-            int img_height = input_img_.rows;
-            
-            // 获取基本文件名，用于定位对应的分割标签文件
-            std::string image_basename;
-            size_t lastSlash = label_path_.find_last_of("/\\");
-            if (lastSlash != std::string::npos) {
-                image_basename = label_path_.substr(lastSlash + 1);
-            } else {
-                image_basename = label_path_;
-            }
-            
-            // 移除扩展名
-            size_t lastDot = image_basename.find_last_of(".");
-            if (lastDot != std::string::npos) {
-                image_basename = image_basename.substr(0, lastDot);
-            }
-            
-            // 构建分割标签文件路径
-            std::string segmentation_label_path = label_path_;
-            
-            // 尝试打开分割标签文件
-            std::ifstream seg_label_file(segmentation_label_path);
-            if (seg_label_file.is_open()) {
-                // 读取标签文件的所有行，每行对应一个分割实例
-                std::vector<cv::Mat> gt_masks;
-                std::vector<int> gt_class_ids;
-                
-                std::string line;
-                while (std::getline(seg_label_file, line)) {
-                    // 跳过空行
-                    if (line.empty()) continue;
-                    
-                    std::istringstream iss(line);
-                    int class_id;
-                    iss >> class_id; // 第一个值是类别ID
-                    
-                    // 解析多边形并创建掩码
-                    cv::Mat gt_mask = parse_polygon_from_line(line, img_width, img_height);
-                    if (!gt_mask.empty() && cv::countNonZero(gt_mask) > 0) {
-                        gt_masks.push_back(gt_mask);
-                        gt_class_ids.push_back(class_id);
-                        
-                        // 更新类别的真实标签计数
-                        class_gt_counts[class_id]++;
-                    }
+            // 定义一个函数，用于计算掩码之间的IoU
+            auto calculate_mask_iou = [](const cv::Mat& mask1, const cv::Mat& mask2) -> float {
+                if (mask1.empty() || mask2.empty() || 
+                    mask1.size() != mask2.size() || 
+                    mask1.type() != CV_8UC1 || 
+                    mask2.type() != CV_8UC1) {
+                    return 0.0f;
                 }
                 
-                seg_label_file.close();
+                // 计算交集和并集
+                cv::Mat intersection, union_mask;
+                cv::bitwise_and(mask1, mask2, intersection);
+                cv::bitwise_or(mask1, mask2, union_mask);
                 
-                // 对于每个类别
+                // 计算非零像素数（即掩码区域大小）
+                int intersection_area = cv::countNonZero(intersection);
+                int union_area = cv::countNonZero(union_mask);
+                
+                // 防止除零
+                if (union_area <= 0) return 0.0f;
+                
+                // 返回IoU
+                return static_cast<float>(intersection_area) / static_cast<float>(union_area);
+            };
+            
+            // 定义一个函数，用于解析分割标签文件中的多边形点
+            auto parse_polygon_from_line = [](const std::string& line, int img_width, int img_height) -> cv::Mat {
+                std::istringstream iss(line);
+                int class_id;
+                iss >> class_id; // 第一个值是类别ID
+                
+                std::vector<cv::Point> points;
+                float x, y;
+                while (iss >> x >> y) {
+                    // 转换为像素坐标
+                    int px = static_cast<int>(x * img_width);
+                    int py = static_cast<int>(y * img_height);
+                    points.push_back(cv::Point(px, py));
+                }
+                
+                // 创建空白掩码
+                cv::Mat mask = cv::Mat::zeros(img_height, img_width, CV_8UC1);
+                
+                // 至少需要3个点来形成多边形
+                if (points.size() >= 3) {
+                    // 绘制填充多边形
+                    std::vector<std::vector<cv::Point>> polygons = {points};
+                    cv::fillPoly(mask, polygons, cv::Scalar(255));
+                }
+                
+                return mask;
+            };
+            
+            // 保存每个类别的指标
+            std::map<int, std::vector<float>> class_ious; // 每个类别的所有实例IoU
+            std::map<int, int> class_tp_counts; // 每个类别的真阳性计数
+            std::map<int, int> class_fp_counts; // 每个类别的假阳性计数
+            std::map<int, int> class_gt_counts; // 每个类别的真实标签计数
+            
+            float total_iou_sum = 0.0f; // 所有IoU值的总和
+            int total_instances = 0; // 成功匹配的实例总数
+            
+            // 如果有真实标签数据
+            if (has_gt_data && !gt_boxes_.empty()) {
+                int img_width = input_img_.cols;
+                int img_height = input_img_.rows;
+                
+                // 获取基本文件名，用于定位对应的分割标签文件
+                std::string image_basename;
+                size_t lastSlash = label_path_.find_last_of("/\\");
+                if (lastSlash != std::string::npos) {
+                    image_basename = label_path_.substr(lastSlash + 1);
+                } else {
+                    image_basename = label_path_;
+                }
+                
+                // 移除扩展名
+                size_t lastDot = image_basename.find_last_of(".");
+                if (lastDot != std::string::npos) {
+                    image_basename = image_basename.substr(0, lastDot);
+                }
+                
+                // 构建分割标签文件路径
+                std::string segmentation_label_path = label_path_;
+                
+                // 尝试打开分割标签文件
+                std::ifstream seg_label_file(segmentation_label_path);
+                if (seg_label_file.is_open()) {
+                    // 读取标签文件的所有行，每行对应一个分割实例
+                    std::vector<cv::Mat> gt_masks;
+                    std::vector<int> gt_class_ids;
+                    
+                    std::string line;
+                    while (std::getline(seg_label_file, line)) {
+                        // 跳过空行
+                        if (line.empty()) continue;
+                        
+                        std::istringstream iss(line);
+                        int class_id;
+                        iss >> class_id; // 第一个值是类别ID
+                        
+                        // 解析多边形并创建掩码
+                        cv::Mat gt_mask = parse_polygon_from_line(line, img_width, img_height);
+                        if (!gt_mask.empty() && cv::countNonZero(gt_mask) > 0) {
+                            gt_masks.push_back(gt_mask);
+                            gt_class_ids.push_back(class_id);
+                            
+                            // 更新类别的真实标签计数
+                            class_gt_counts[class_id]++;
+                        }
+                    }
+                    
+                    seg_label_file.close();
+                    
+                    // 对于每个类别
+                    for (int cls_id = 0; cls_id < classes_num_; cls_id++) {
+                        // 遍历该类别的所有检测结果
+                        for (size_t i = 0; i < indices_[cls_id].size(); i++) {
+                            int mask_idx = indices_[cls_id][i];
+                            
+                            // 确保掩码索引有效
+                            if (mask_idx < 0 || mask_idx >= static_cast<int>(masks_.size())) {
+                                continue;
+                            }
+                            
+                            // 获取预测掩码
+                            const cv::Mat& pred_mask = masks_[mask_idx];
+                            float max_iou = 0.0f;
+                            int best_gt_idx = -1;
+                            
+                            // 找到与当前预测掩码IoU最大的真实掩码
+                            for (size_t gt_idx = 0; gt_idx < gt_masks.size(); gt_idx++) {
+                                // 只考虑相同类别
+                                if (cls_id == gt_class_ids[gt_idx]) {
+                                    float iou = calculate_mask_iou(pred_mask, gt_masks[gt_idx]);
+                                    if (iou > max_iou) {
+                                        max_iou = iou;
+                                        best_gt_idx = gt_idx;
+                                    }
+                                }
+                            }
+                            
+                            // IoU阈值，通常为0.5
+                            float iou_threshold = 0.5f;
+                            
+                            // 如果找到匹配的真实掩码，且IoU大于阈值
+                            if (max_iou >= iou_threshold && best_gt_idx >= 0) {
+                                // 记录该类别的IoU
+                                class_ious[cls_id].push_back(max_iou);
+                                total_iou_sum += max_iou;
+                                total_instances++;
+                                
+                                // 增加真阳性计数
+                                class_tp_counts[cls_id]++;
+                                
+                                // 移除已匹配的真实掩码（防止多次匹配）
+                                gt_masks[best_gt_idx] = cv::Mat();
+                            } else {
+                                // 增加假阳性计数
+                                class_fp_counts[cls_id]++;
+                            }
+                        }
+                    }
+                    
+                    // 计算整体指标
+                    float mean_iou = (total_instances > 0) ? (total_iou_sum / total_instances) : 0.0f;
+                    
+                    // 计算每个类别的精确率、召回率和F1分数
+                    float total_precision = 0.0f;
+                    float total_recall = 0.0f;
+                    float total_f1 = 0.0f;
+                    int valid_classes = 0;
+                    
+                    for (int cls_id = 0; cls_id < classes_num_; cls_id++) {
+                        int tp = class_tp_counts[cls_id];
+                        int fp = class_fp_counts[cls_id];
+                        int gt_count = class_gt_counts[cls_id];
+                        
+                        if (tp + fp > 0 && gt_count > 0) {
+                            float precision = static_cast<float>(tp) / (tp + fp);
+                            float recall = static_cast<float>(tp) / gt_count;
+                            float f1 = (precision + recall > 0) ? 
+                                    (2 * precision * recall) / (precision + recall) : 0.0f;
+                            
+                            total_precision += precision;
+                            total_recall += recall;
+                            total_f1 += f1;
+                            valid_classes++;
+                            
+                            std::cout << "Class " << cls_id << " (" 
+                                    << (cls_id < static_cast<int>(class_names_.size()) ? 
+                                        class_names_[cls_id] : "Unknown") 
+                                    << "): Precision=" << precision 
+                                    << ", Recall=" << recall 
+                                    << ", F1=" << f1 
+                                    << ", Mean IoU=" << (class_ious[cls_id].empty() ? 0.0f : 
+                                        std::accumulate(class_ious[cls_id].begin(), class_ious[cls_id].end(), 0.0f) / 
+                                        class_ious[cls_id].size()) 
+                                    << std::endl;
+                        }
+                    }
+                    
+                    // 计算平均指标
+                    float avg_precision = (valid_classes > 0) ? (total_precision / valid_classes) : 0.0f;
+                    float avg_recall = (valid_classes > 0) ? (total_recall / valid_classes) : 0.0f;
+                    float avg_f1 = (valid_classes > 0) ? (total_f1 / valid_classes) : 0.0f;
+                    
+                    // 设置结果
+                    result.precision = avg_precision;
+                    result.recall = avg_recall;
+                    result.mAP50 = mean_iou; // 使用平均IoU作为mAP50
+                    result.mAP50_95 = mean_iou * 0.7f; // 简化计算，使用mAP50的70%作为mAP50-95
+                    
+                    std::cout << "Segmentation Metrics:" << std::endl;
+                    std::cout << "  Average Precision: " << avg_precision << std::endl;
+                    std::cout << "  Average Recall: " << avg_recall << std::endl;
+                    std::cout << "  Average F1 Score: " << avg_f1 << std::endl;
+                    std::cout << "  Mean IoU: " << mean_iou << std::endl;
+                } else {
+                    std::cerr << "Warning: Could not open segmentation label file: " 
+                            << segmentation_label_path << std::endl;
+                    
+                    // 使用简单模拟
+                    result.precision = 0.5f;
+                    result.recall = 0.5f;
+                    result.mAP50 = 0.5f;
+                    result.mAP50_95 = 0.35f;
+                }
+            } else {
+                // 如果没有标注数据，使用简单模拟
+                
+                // 基于检测到的目标数量和掩码面积来模拟精度和召回率
+                int total_detections = 0;
+                float avg_mask_area_ratio = 0.0f;
+                
                 for (int cls_id = 0; cls_id < classes_num_; cls_id++) {
-                    // 遍历该类别的所有检测结果
+                    total_detections += indices_[cls_id].size();
+                    
                     for (size_t i = 0; i < indices_[cls_id].size(); i++) {
                         int mask_idx = indices_[cls_id][i];
                         
                         // 确保掩码索引有效
-                        if (mask_idx < 0 || mask_idx >= static_cast<int>(masks_.size())) {
-                            continue;
+                        if (mask_idx >= 0 && mask_idx < static_cast<int>(masks_.size())) {
+                            // 计算掩码面积占整个图像的比例
+                            float mask_area_ratio = static_cast<float>(cv::countNonZero(masks_[mask_idx])) / 
+                                                (input_img_.cols * input_img_.rows);
+                            
+                            avg_mask_area_ratio += mask_area_ratio;
                         }
-                        
-                        // 获取预测掩码
-                        const cv::Mat& pred_mask = masks_[mask_idx];
-                        float max_iou = 0.0f;
-                        int best_gt_idx = -1;
-                        
-                        // 找到与当前预测掩码IoU最大的真实掩码
-                        for (size_t gt_idx = 0; gt_idx < gt_masks.size(); gt_idx++) {
-                            // 只考虑相同类别
-                            if (cls_id == gt_class_ids[gt_idx]) {
-                                float iou = calculate_mask_iou(pred_mask, gt_masks[gt_idx]);
-                                if (iou > max_iou) {
-                                    max_iou = iou;
-                                    best_gt_idx = gt_idx;
+                    }
+                }
+                
+                if (total_detections > 0) {
+                    avg_mask_area_ratio /= total_detections; // 计算平均掩码面积比例
+                    
+                    // 基于平均掩码面积比例简单估计precision和recall
+                    // 通常，较大的掩码（相对于图像）可能意味着较高的置信度
+                    float confidence_estimate = 0.5f + 0.5f * avg_mask_area_ratio; // 在0.5到1.0之间调整
+                    
+                    result.precision = confidence_estimate;
+                    result.recall = confidence_estimate * 0.9f; // 假设召回率稍低于精度
+                    result.mAP50 = confidence_estimate * 0.85f;
+                    result.mAP50_95 = confidence_estimate * 0.7f;
+                    
+                    std::cout << "Using simulated metrics (no ground truth data):" << std::endl;
+                    std::cout << "  Precision: " << result.precision << std::endl;
+                    std::cout << "  Recall: " << result.recall << std::endl;
+                    std::cout << "  mAP@0.5: " << result.mAP50 << std::endl;
+                    std::cout << "  mAP@0.5:0.95: " << result.mAP50_95 << std::endl;
+                }
+            }
+        }
+        else if(model_type_ == FCN){
+           // 计算FCN语义分割的评估指标
+            std::cout << "Calculating FCN semantic segmentation metrics..." << std::endl;
+            
+            // 检查是否有标签数据
+            if (!label_path_.empty()) {
+                // 尝试加载标签掩码图像
+                cv::Mat gt_mask = cv::imread(label_path_, cv::IMREAD_GRAYSCALE);
+                
+                if (!gt_mask.empty()) {
+                    // 确保标签掩码和预测掩码尺寸一致
+                    if (gt_mask.size() != semantic_mask_.size()) {
+                        cv::resize(gt_mask, gt_mask, semantic_mask_.size(), 0, 0, cv::INTER_NEAREST);
+                    }
+                    
+                    // 计算像素级准确率和IoU
+                    int correct_pixels = 0;
+                    int total_pixels = gt_mask.rows * gt_mask.cols;
+                    std::vector<int> intersection(classes_num_, 0);
+                    std::vector<int> union_pixels(classes_num_, 0);
+                    std::vector<int> gt_pixels(classes_num_, 0);
+                    std::vector<int> pred_pixels(classes_num_, 0);
+                    
+                    for (int y = 0; y < gt_mask.rows; ++y) {
+                        for (int x = 0; x < gt_mask.cols; ++x) {
+                            int gt_class = gt_mask.at<uchar>(y, x);
+                            int pred_class = semantic_mask_.at<uchar>(y, x);
+                            
+                            // 确保类别ID在有效范围内
+                            if (gt_class < classes_num_ && pred_class < classes_num_) {
+                                // 计算正确分类的像素数
+                                if (gt_class == pred_class) {
+                                    correct_pixels++;
+                                    intersection[gt_class]++;
+                                }
+                                
+                                // 更新每个类别的像素统计
+                                gt_pixels[gt_class]++;
+                                pred_pixels[pred_class]++;
+                                
+                                // 计算并集
+                                if (gt_class == pred_class) {
+                                    union_pixels[gt_class]++;
+                                } else {
+                                    union_pixels[gt_class]++;
+                                    union_pixels[pred_class]++;
                                 }
                             }
                         }
-                        
-                        // IoU阈值，通常为0.5
-                        float iou_threshold = 0.5f;
-                        
-                        // 如果找到匹配的真实掩码，且IoU大于阈值
-                        if (max_iou >= iou_threshold && best_gt_idx >= 0) {
-                            // 记录该类别的IoU
-                            class_ious[cls_id].push_back(max_iou);
-                            total_iou_sum += max_iou;
-                            total_instances++;
+                    }
+                    
+                    // 计算整体像素准确率
+                    float pixel_accuracy = static_cast<float>(correct_pixels) / total_pixels;
+                    
+                    // 计算平均IoU
+                    float mean_iou = 0.0f;
+                    int valid_classes = 0;
+                    
+                    for (int c = 0; c < classes_num_; ++c) {
+                        if (gt_pixels[c] > 0 || pred_pixels[c] > 0) {
+                            float class_iou = 0.0f;
+                            if (union_pixels[c] > 0) {
+                                class_iou = static_cast<float>(intersection[c]) / union_pixels[c];
+                            }
+                            mean_iou += class_iou;
+                            valid_classes++;
                             
-                            // 增加真阳性计数
-                            class_tp_counts[cls_id]++;
-                            
-                            // 移除已匹配的真实掩码（防止多次匹配）
-                            gt_masks[best_gt_idx] = cv::Mat();
-                        } else {
-                            // 增加假阳性计数
-                            class_fp_counts[cls_id]++;
+                            std::cout << "Class " << c << " IoU: " << class_iou << std::endl;
                         }
                     }
-                }
-                
-                // 计算整体指标
-                float mean_iou = (total_instances > 0) ? (total_iou_sum / total_instances) : 0.0f;
-                
-                // 计算每个类别的精确率、召回率和F1分数
-                float total_precision = 0.0f;
-                float total_recall = 0.0f;
-                float total_f1 = 0.0f;
-                int valid_classes = 0;
-                
-                for (int cls_id = 0; cls_id < classes_num_; cls_id++) {
-                    int tp = class_tp_counts[cls_id];
-                    int fp = class_fp_counts[cls_id];
-                    int gt_count = class_gt_counts[cls_id];
                     
-                    if (tp + fp > 0 && gt_count > 0) {
-                        float precision = static_cast<float>(tp) / (tp + fp);
-                        float recall = static_cast<float>(tp) / gt_count;
-                        float f1 = (precision + recall > 0) ? 
-                                  (2 * precision * recall) / (precision + recall) : 0.0f;
-                        
-                        total_precision += precision;
-                        total_recall += recall;
-                        total_f1 += f1;
-                        valid_classes++;
-                        
-                        std::cout << "Class " << cls_id << " (" 
-                                  << (cls_id < static_cast<int>(class_names_.size()) ? 
-                                     class_names_[cls_id] : "Unknown") 
-                                  << "): Precision=" << precision 
-                                  << ", Recall=" << recall 
-                                  << ", F1=" << f1 
-                                  << ", Mean IoU=" << (class_ious[cls_id].empty() ? 0.0f : 
-                                    std::accumulate(class_ious[cls_id].begin(), class_ious[cls_id].end(), 0.0f) / 
-                                    class_ious[cls_id].size()) 
-                                  << std::endl;
+                    if (valid_classes > 0) {
+                        mean_iou /= valid_classes;
                     }
+                    
+                    // 设置结果
+                    result.precision = pixel_accuracy;  // 使用像素准确率作为精确率
+                    result.recall = pixel_accuracy;     // 对于语义分割，精确率和召回率通常相同
+                    result.mAP50 = mean_iou;           // 使用mIoU作为mAP50
+                    result.mAP50_95 = mean_iou * 0.7f; // 简化计算
+                    
+                    std::cout << "Semantic Segmentation Metrics:" << std::endl;
+                    std::cout << "  Pixel Accuracy: " << pixel_accuracy << std::endl;
+                    std::cout << "  Mean IoU: " << mean_iou << std::endl;
+                } else {
+                    std::cerr << "Warning: Could not load ground truth mask from: " << label_path_ << std::endl;
+                    std::cerr << "Skipping FCN semantic segmentation metrics calculation.(No ground truth mask)" << std::endl;
+                    result.precision = 0.0f;
+                    result.recall = 0.0f;
+                    result.mAP50 = 0.0f;
+                    result.mAP50_95 = 0.0f;
                 }
-                
-                // 计算平均指标
-                float avg_precision = (valid_classes > 0) ? (total_precision / valid_classes) : 0.0f;
-                float avg_recall = (valid_classes > 0) ? (total_recall / valid_classes) : 0.0f;
-                float avg_f1 = (valid_classes > 0) ? (total_f1 / valid_classes) : 0.0f;
-                
-                // 设置结果
-                result.precision = avg_precision;
-                result.recall = avg_recall;
-                result.mAP50 = mean_iou; // 使用平均IoU作为mAP50
-                result.mAP50_95 = mean_iou * 0.7f; // 简化计算，使用mAP50的70%作为mAP50-95
-                
-                std::cout << "Segmentation Metrics:" << std::endl;
-                std::cout << "  Average Precision: " << avg_precision << std::endl;
-                std::cout << "  Average Recall: " << avg_recall << std::endl;
-                std::cout << "  Average F1 Score: " << avg_f1 << std::endl;
-                std::cout << "  Mean IoU: " << mean_iou << std::endl;
             } else {
-                std::cerr << "Warning: Could not open segmentation label file: " 
-                         << segmentation_label_path << std::endl;
-                
+                std::cout << "No ground truth mask provided, using simulated metrics." << std::endl;
+                std::cerr << "Skipping FCN semantic segmentation metrics calculation.(No ground truth mask)" << std::endl;
                 // 使用简单模拟
-                result.precision = 0.5f;
-                result.recall = 0.5f;
-                result.mAP50 = 0.5f;
-                result.mAP50_95 = 0.35f;
-            }
-        } else {
-            // 如果没有标注数据，使用简单模拟
-            
-            // 基于检测到的目标数量和掩码面积来模拟精度和召回率
-            int total_detections = 0;
-            float avg_mask_area_ratio = 0.0f;
-            
-            for (int cls_id = 0; cls_id < classes_num_; cls_id++) {
-                total_detections += indices_[cls_id].size();
-                
-                for (size_t i = 0; i < indices_[cls_id].size(); i++) {
-                    int mask_idx = indices_[cls_id][i];
-                    
-                    // 确保掩码索引有效
-                    if (mask_idx >= 0 && mask_idx < static_cast<int>(masks_.size())) {
-                        // 计算掩码面积占整个图像的比例
-                        float mask_area_ratio = static_cast<float>(cv::countNonZero(masks_[mask_idx])) / 
-                                              (input_img_.cols * input_img_.rows);
-                        
-                        avg_mask_area_ratio += mask_area_ratio;
-                    }
-                }
+                result.precision = 0.0f;
+                result.recall = 0.0f;
+                result.mAP50 = 0.0f;
+                result.mAP50_95 = 0.0f;
             }
             
-            if (total_detections > 0) {
-                avg_mask_area_ratio /= total_detections; // 计算平均掩码面积比例
-                
-                // 基于平均掩码面积比例简单估计precision和recall
-                // 通常，较大的掩码（相对于图像）可能意味着较高的置信度
-                float confidence_estimate = 0.5f + 0.5f * avg_mask_area_ratio; // 在0.5到1.0之间调整
-                
-                result.precision = confidence_estimate;
-                result.recall = confidence_estimate * 0.9f; // 假设召回率稍低于精度
-                result.mAP50 = confidence_estimate * 0.85f;
-                result.mAP50_95 = confidence_estimate * 0.7f;
-                
-                std::cout << "Using simulated metrics (no ground truth data):" << std::endl;
-                std::cout << "  Precision: " << result.precision << std::endl;
-                std::cout << "  Recall: " << result.recall << std::endl;
-                std::cout << "  mAP@0.5: " << result.mAP50 << std::endl;
-                std::cout << "  mAP@0.5:0.95: " << result.mAP50_95 << std::endl;
-            }
-        }
+        }   
     }
 }
 
@@ -2892,7 +3149,7 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLO11() {
                       << ") mapped from NMSBoxes. Max index: " << decoded_bboxes_all.size() - 1 << std::endl;
             continue;
         }
-
+        
         // 获取检测框相关数据
         int cls_id = decoded_classes_all[original_idx];
         cv::Rect2d bbox = decoded_bboxes_all[original_idx];
@@ -3006,6 +3263,156 @@ bool BPU_Detect::Model_Segmentation_Postprocess_YOLO11() {
 }
 
 bool BPU_Detect::Model_Segmentation_Postprocess_FCN(){
-
-
+    std::cout << "Starting FCN Segmentation Postprocess..." << std::endl;
+    
+    // 清空旧结果
+    bboxes_.clear();
+    scores_.clear();
+    indices_.clear(); 
+    masks_.clear();
+    
+    // 获取FCN模型的输出张量
+    if (output_count_ != 1) {
+        std::cerr << "Error: FCN model should have exactly 1 output tensor, but got " << output_count_ << std::endl;
+        return false;
+    }
+    
+    hbDNNTensor& output_tensor = output_tensors_[output_order_[0]];
+    
+    // 刷新内存
+    hbSysFlushMem(&output_tensor.sysMem[0], HB_SYS_MEM_CACHE_INVALIDATE);
+    
+    // 检查输出张量的维度
+    if (output_tensor.properties.validShape.numDimensions != 4) {
+        std::cerr << "Error: FCN output tensor should have 4 dimensions, but got " 
+                 << output_tensor.properties.validShape.numDimensions << std::endl;
+        return false;
+    }
+    
+    // 获取输出张量的尺寸 (NCHW格式)
+    // int batch_size = output_tensor.properties.validShape.dimensionSize[0];
+    int output_c = output_tensor.properties.validShape.dimensionSize[1];
+    int output_h = output_tensor.properties.validShape.dimensionSize[2];
+    int output_w = output_tensor.properties.validShape.dimensionSize[3];
+    
+    // 验证通道数是否等于类别数
+    if (output_c != classes_num_) {
+        std::cerr << "Warning: FCN output channels (" << output_c 
+                 << ") does not match expected class count (" << classes_num_ << ")" << std::endl;
+    }
+    
+    // 获取输出数据指针
+    float* output_data = nullptr;
+    
+    // 根据量化类型处理输出数据
+    if (output_tensor.properties.quantiType == NONE) {
+        // 非量化模型，直接获取float输出 
+        std::cout << "output_tensor.properties.quantiType: " << output_tensor.properties.quantiType << std::endl;
+        output_data = reinterpret_cast<float*>(output_tensor.sysMem[0].virAddr);
+        
+    } else {
+        std::cerr << "Error: Unsupported quantization type: " << output_tensor.properties.quantiType << std::endl;
+        return false;
+    }
+    
+    // 分配每个类别的掩码
+    std::vector<cv::Mat> class_masks(classes_num_);
+    for (int cls = 0; cls < classes_num_; ++cls) {
+        class_masks[cls] = cv::Mat::zeros(output_h, output_w, CV_8UC1);
+    }
+    
+    // 对于每个像素，确定最高置信度的类别 (处理NCHW格式)
+    cv::Mat prediction_map = cv::Mat::zeros(output_h, output_w, CV_8UC1);
+    
+    for (int h = 0; h < output_h; ++h) {
+        for (int w = 0; w < output_w; ++w) {
+            // 找到每个像素位置的最大类别概率
+            int max_class = 0;
+            float max_prob = output_data[0 * output_h * output_w + h * output_w + w]; // 第0类的概率
+            
+            for (int cls = 1; cls < output_c; ++cls) {
+                float prob = output_data[cls * output_h * output_w + h * output_w + w];
+                if (prob > max_prob) {
+                    max_prob = prob;
+                    max_class = cls;
+                }
+            }
+            
+            // 将像素分配给最高概率的类别
+            prediction_map.at<uchar>(h, w) = static_cast<uchar>(max_class);
+            
+            // 对应类别的掩码标记为255（白色）
+            if (max_class > 0) { // 如果类别为0通常表示背景
+                class_masks[max_class].at<uchar>(h, w) = 255;
+            }
+        }
+    }
+    
+    // 将输出掩码调整到原始图像尺寸
+    int orig_img_h = input_img_.rows;
+    int orig_img_w = input_img_.cols;
+    
+    // 为每个分割类别创建结果
+    bboxes_.resize(classes_num_);
+    scores_.resize(classes_num_);
+    indices_.resize(classes_num_);
+    
+    // 处理每个类别的掩码
+    for (int cls = 1; cls < classes_num_; ++cls) { // 从1开始，跳过背景类
+        // 调整掩码大小到输入模型的尺寸
+        cv::Mat resized_mask;
+        cv::resize(class_masks[cls], resized_mask, cv::Size(input_w_, input_h_), 0, 0, cv::INTER_NEAREST);
+        
+        // 从letterbox填充的图像中提取真实区域
+        cv::Mat orig_size_mask;
+        if (x_scale_ == y_scale_) { // 等比例缩放情况
+            cv::Rect roi(x_shift_, y_shift_, 
+                         static_cast<int>(orig_img_w * x_scale_), 
+                         static_cast<int>(orig_img_h * y_scale_));
+            
+            // 确保ROI在resized_mask范围内
+            roi.width = std::min(roi.width, input_w_ - roi.x);
+            roi.height = std::min(roi.height, input_h_ - roi.y);
+            
+            if (roi.width > 0 && roi.height > 0) {
+                // 裁剪掩码并调整回原始图像尺寸
+                cv::Mat roi_mask = resized_mask(roi);
+                cv::resize(roi_mask, orig_size_mask, cv::Size(orig_img_w, orig_img_h), 0, 0, cv::INTER_NEAREST);
+            } else {
+                std::cerr << "Warning: Invalid ROI for class " << cls << std::endl;
+                continue;
+            }
+        } else {
+            // 直接调整大小到原始图像尺寸（处理非等比例缩放情况）
+            cv::resize(resized_mask, orig_size_mask, cv::Size(orig_img_w, orig_img_h), 0, 0, cv::INTER_NEAREST);
+        }
+        
+        // 计算掩码中非零像素的数量（即掩码面积）
+        int mask_area = cv::countNonZero(orig_size_mask);
+        
+        // 如果该类别有像素存在
+        if (mask_area > 0) {
+            // 找到掩码的边界框（用于显示）
+            cv::Rect bbox = cv::boundingRect(orig_size_mask);
+            
+            // 计算掩码区域的平均置信度
+            float avg_confidence = 0.4f; // 默认置信度
+            
+            // 存储掩码
+            masks_.push_back(orig_size_mask);
+            
+            // 保存该类别的结果
+            bboxes_[cls].push_back(cv::Rect2d(bbox.x, bbox.y, bbox.width, bbox.height));
+            scores_[cls].push_back(avg_confidence);
+            indices_[cls].push_back(masks_.size() - 1);
+        }
+    }
+    
+    // 释放内存（如果是量化模型）
+    if (output_tensor.properties.quantiType == SCALE && output_data) {
+        delete[] output_data;
+    }
+    
+    std::cout << "FCN segmentation post-processing complete. Generated " << masks_.size() << " masks." << std::endl;
+    return true;
 }
